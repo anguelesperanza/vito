@@ -1,0 +1,11 @@
+*.sh
+*.exe
+InstallationLog.txt
+autorebase.bat
+clang64
+build/
+odin_asm/
+*.S
+*.elf
+*.velf
+*.vpk
