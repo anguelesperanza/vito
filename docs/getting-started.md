@@ -7,7 +7,8 @@ under [Not verified](#not-verified).
 
 **Tested with:** Windows 11, Odin `dev-2026-11:e28f5d1ff`, VitaSDK `2026.08`
 (`arm-vita-eabi-gcc` 15.2.0), Vita3K v0.2.1, and a hacked PS Vita.
-Both example projects were run on the emulator **and** on real hardware.
+The template and the vita2d example were run on the emulator **and** on real
+hardware. The touch example was run on real hardware only.
 
 ---
 
@@ -57,6 +58,9 @@ cd NewProjectTemplate        # framebuffer demo, no extra libraries
 
 cd Examples\Vita2D-Example   # vita2d demo, needs libvita2d
 .\build.bat                  # -> Vita2D-Example.vpk
+
+cd Examples\Touch-Example    # front + back touch panels, drawn with vita2d
+.\build.bat                  # -> Touch-Example.vpk
 ```
 
 Settings at the top of each `build.bat`:
@@ -72,13 +76,29 @@ Settings at the top of each `build.bat`:
 shows the `sceClibPrintf` output.
 **Real Vita:** install the `.vpk` with VitaShell.
 
-Controls in both examples: D-pad or left stick moves things, Cross toggles a
-colour (and logs `CROSS pressed`), Start exits.
+Start exits every example. In the template and the vita2d example, the D-pad or
+left stick moves things and Cross toggles a colour (and logs `CROSS pressed`).
 
-| Project              | Title ID    | What it shows                                                     |
-|----------------------|-------------|-------------------------------------------------------------------|
-| `NewProjectTemplate` | `ODIN00001` | Scrolling gradient + a movable white square (raw framebuffer)     |
-| `Examples/Vita2D-Example` | `ODIN00002` | vita2d: rotating/scaling sprite, circles, line, text, tint        |
+| Project                   | Title ID    | What it shows                                                        |
+|---------------------------|-------------|----------------------------------------------------------------------|
+| `NewProjectTemplate`      | `ODIN00001` | Scrolling gradient + a movable white square (raw framebuffer)        |
+| `Examples/Vita2D-Example` | `ODIN00002` | vita2d: rotating/scaling sprite, circles, line, text, tint           |
+| `Examples/Touch-Example`  | `ODIN00003` | Front touches (cyan circles + trail), back touches (magenta squares), live coordinates. Cross clears the trail |
+
+### Touch input
+
+`lib/sce/touch.odin` binds `SceTouch` (link `-lSceTouch_stub`). All arguments are
+integers, so it needs no float bridge.
+
+- Start sampling per panel before reading: `sceTouchSetSamplingState(port, .START)`.
+- Read with `sceTouchPeek(port, &data, 1)` (non-blocking). `data.reportNum` is the
+  number of fingers; `data.report[i]` holds `id`, `force`, and `x`/`y`.
+- `x`/`y` are **panel coordinates** (the front is about 1920x1088), not screen
+  pixels. Convert with the active area from `sceTouchGetPanelInfo`:
+  `screen = (raw - minAa) / (maxAa - minAa) * screen_size`. The example does this
+  in `make_panel` / `to_screen`, with the known panel sizes as a fallback.
+- The back panel has a different active area (about 1920x890), so use its own
+  `sceTouchGetPanelInfo`, not the front's.
 
 ---
 
@@ -293,5 +313,13 @@ These all caused a real failure while setting this up.
   `PvfTextWidth`/`PvfTextHeight`, `DrawPoint`, `Fini` (hangs Vita3K).
 - **CPU target.** The Odin object is tagged `ARM1176JZF-S` (ARMv6), not
   Cortex-A9. It runs on the hardware, but Odin's `-microarch` option has not been tried.
-- **Libraries beyond `SceCtrl`, `SceDisplay`, `SceSysmem`, `SceLibKernel` and
-  `vita2d`.** No audio, touch, networking, file I/O or 3D (`SceGxm`) bindings yet.
+- **Touch beyond what the example uses.** `sceTouchPeek`, `sceTouchSetSamplingState`
+  and `sceTouchGetPanelInfo` are confirmed on hardware (front and back panels).
+  `sceTouchRead`, `sceTouchGetSamplingState`, `sceTouchEnableTouchForce` /
+  `DisableTouchForce`, the `force` value and the `HIDE_UPPER_LAYER` flag are bound
+  but not exercised. The touch example has not been run in Vita3K, and how that
+  emulator handles the back panel is unknown. The region and "Ext" `SceTouch`
+  functions are not bound.
+- **Libraries beyond `SceCtrl`, `SceDisplay`, `SceSysmem`, `SceLibKernel`, `SceTouch`
+  and `vita2d`.** No audio, networking, file I/O, motion sensors or 3D (`SceGxm`)
+  bindings yet.
