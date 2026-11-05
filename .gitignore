@@ -9,3 +9,4 @@ odin_asm/
 *.elf
 *.velf
 *.vpk
+error-screenshots/

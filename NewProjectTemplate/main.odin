@@ -22,29 +22,33 @@ game_main :: proc "c" (argc: i32, argv: [^]cstring) -> i32 {
     sce.sceClibPrintf("odin_main: started\n")
 
     // ---------------------------------------------------------------
-    // Framebuffer: one CDRAM block big enough for 960x544 RGBA8888.
+    // Two framebuffers (CDRAM blocks big enough for 960x544 RGBA8888). We draw
+    // into the one that is NOT being displayed, then swap. Drawing straight
+    // into the displayed buffer tears and flickers on real hardware, because
+    // the CPU fill takes longer than a frame.
     // ---------------------------------------------------------------
     fb_bytes :: SCREEN_W * SCREEN_H * 4
     fb_size  :: u32((fb_bytes + sce.CDRAM_ALIGNMENT - 1) / sce.CDRAM_ALIGNMENT * sce.CDRAM_ALIGNMENT)
 
-    block := sce.sceKernelAllocMemBlock("display", sce.MEMBLOCK_TYPE_USER_CDRAM_RW, fb_size, nil)
-    if block < 0 {
-        sce.sceClibPrintf("sceKernelAllocMemBlock failed: 0x%08x\n", u32(block))
-        return sce.sceKernelExitProcess(1)
+    frames: [2]sce.DisplayFrameBuf
+    for i in 0 ..< 2 {
+        block := sce.sceKernelAllocMemBlock("display", sce.MEMBLOCK_TYPE_USER_CDRAM_RW, fb_size, nil)
+        if block < 0 {
+            sce.sceClibPrintf("sceKernelAllocMemBlock failed: 0x%08x\n", u32(block))
+            return sce.sceKernelExitProcess(1)
+        }
+        base: rawptr
+        sce.sceKernelGetMemBlockBase(block, &base)
+        frames[i] = sce.DisplayFrameBuf {
+            size        = size_of(sce.DisplayFrameBuf),
+            base        = base,
+            pitch       = SCREEN_W,
+            pixelformat = sce.DISPLAY_PIXELFORMAT_A8B8G8R8,
+            width       = SCREEN_W,
+            height      = SCREEN_H,
+        }
     }
-
-    base: rawptr
-    sce.sceKernelGetMemBlockBase(block, &base)
-    pixels := ([^]u32)(base)
-
-    frame := sce.DisplayFrameBuf {
-        size        = size_of(sce.DisplayFrameBuf),
-        base        = base,
-        pitch       = SCREEN_W,
-        pixelformat = sce.DISPLAY_PIXELFORMAT_A8B8G8R8,
-        width       = SCREEN_W,
-        height      = SCREEN_H,
-    }
+    back := 0 // index of the buffer we draw into
 
     // ---------------------------------------------------------------
     // Main loop
@@ -84,13 +88,14 @@ game_main :: proc "c" (argc: i32, argv: [^]cstring) -> i32 {
         scroll += 1
 
         // ---- Render ----
-        draw(pixels, sq_x, sq_y, scroll, alt)
-        sce.sceDisplaySetFrameBuf(&frame, .NEXTFRAME)
-        sce.sceDisplayWaitVblankStart()
+        draw(([^]u32)(frames[back].base), sq_x, sq_y, scroll, alt)
+        sce.sceDisplaySetFrameBuf(&frames[back], .NEXTFRAME)
+        sce.sceDisplayWaitSetFrameBuf() // returns once the swap took effect
+        back ~= 1
     }
 
-    // Do not free the framebuffer block here: the display is still scanning it
-    // out. The kernel releases it when the process exits.
+    // Do not free the framebuffer blocks here: the display is still scanning
+    // one of them out. The kernel releases them when the process exits.
     sce.sceKernelExitProcess(0)
     return 0
 }

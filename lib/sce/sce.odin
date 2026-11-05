@@ -81,6 +81,7 @@ DisplayFrameBuf :: struct {
 foreign sce_display {
     sceDisplaySetFrameBuf     :: proc(param: ^DisplayFrameBuf, sync: DisplaySetBufSync) -> i32 ---
     sceDisplayWaitVblankStart :: proc() -> i32 ---
+    sceDisplayWaitSetFrameBuf :: proc() -> i32 ---
 }
 
 // ---------------------------------------------------------------

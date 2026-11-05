@@ -4,16 +4,22 @@ Vito, if it pans out, is meant to become a part of Matchbox as the third target 
 
 This repo would serve as a way to host the stand along bindings / code that Matchbox will use for it.
 
-POC / WIP. The template builds a `.vpk` with `build.bat` and runs in Vita3K (gradient + a square you move with the D-pad).
-It has not been tried on real hardware yet, and anything involving float arguments is untested.
+POC / WIP. `build.bat` turns Odin source into a `.vpk`, and both examples run in Vita3K and on a real (hacked) PS Vita:
+a raw-framebuffer demo and a vita2d demo (sprites, shapes, text). Float arguments go through C bridge wrappers.
+Only a small slice of the Vita API is bound so far.
 
-See [docs/getting-started.md](docs/getting-started.md) for setup, how the build works, and known gotchas.
+See [docs/getting-started.md](docs/getting-started.md) for setup, how the build works, the float ABI problem, and the
+gotchas that were hit on real hardware.
 
 ```
 lib/
-  bridge_utils.h      u2f / f2u helpers for float ABI bridge .c files (not used yet)
+  bridge_utils.h      u2f / f2u helpers for float ABI bridge .c files
   sce/sce.odin        bindings: SceCtrl, SceDisplay, SceSysmem, SceLibKernel (partial)
-NewProjectTemplate/   main.odin, main.c, build.bat -> MyGame.vpk
+  vita2d/             libvita2d bindings + bridge.c (float wrappers)
+  libm/               bridge.c + redefine.syms: makes math.sin/cos/min/max work (hard-float libm)
+NewProjectTemplate/   main.odin, main.c, build.bat -> MyGame.vpk (framebuffer demo)
+Examples/
+  Vita2D-Example/     vita2d demo -> Vita2D-Example.vpk
 docs/                 setup guide
 ```
 

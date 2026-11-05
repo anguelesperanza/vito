@@ -25,6 +25,7 @@ if errorlevel 1 (
 set BUILD=build
 set ODINASM=odin_asm
 set LIB=..\lib
+set BRIDGES=libm
 set ARCH=-march=armv7-a -mtune=cortex-a9 -mfpu=neon -mfloat-abi=hard
 :: ---------------------------------------------------------------
 :: Clean previous build
@@ -53,7 +54,9 @@ for %%f in (%ODINASM%\*.odin.s) do (
     if errorlevel 1 goto :fail
     REM Odin emits soft-float objects; VitaSDK is hard-float and ld rejects the mix
     REM unless the ABI attributes are dropped. Floats cross into SCE libs via bridge.c.
-    arm-vita-eabi-objcopy --remove-section .ARM.attributes "%BUILD%\%%~nf.o"
+    REM libm calls made by Odin (sinf, fmaxf, ...) are renamed to the vito_* wrappers
+    REM in lib\libm\bridge.c, which convert between the two float conventions.
+    arm-vita-eabi-objcopy --remove-section .ARM.attributes --redefine-syms="%LIB%\libm\redefine.syms" "%BUILD%\%%~nf.o"
     if errorlevel 1 goto :fail
 )
 :: ---------------------------------------------------------------
@@ -64,11 +67,13 @@ echo Compiling main.c...
 arm-vita-eabi-gcc -c main.c -o "%BUILD%\main.o" %ARCH%
 if errorlevel 1 goto :fail
 :: ---------------------------------------------------------------
-:: Compile library ABI bridges (add one per lib\*\bridge.c)
+:: Compile library ABI bridges, one per lib\<name>\bridge.c listed in BRIDGES
 :: ---------------------------------------------------------------
-if exist "%LIB%\sce\bridge.c" (
-    echo Compiling lib bridges...
-    arm-vita-eabi-gcc -c "%LIB%\sce\bridge.c" -o "%BUILD%\sce_bridge.o" %ARCH%
+echo.
+echo Compiling lib bridges...
+for %%b in (%BRIDGES%) do (
+    echo  - %LIB%\%%b\bridge.c
+    arm-vita-eabi-gcc -c "%LIB%\%%b\bridge.c" -o "%BUILD%\%%b_bridge.o" %ARCH%
     if errorlevel 1 goto :fail
 )
 :: ---------------------------------------------------------------
@@ -78,7 +83,9 @@ set OBJ=
 for %%f in (%BUILD%\*.o) do set OBJ=!OBJ! %%f
 echo.
 echo Linking ELF...
-arm-vita-eabi-gcc -o "%BUILD%\%TARGET%.elf" %OBJ% %ARCH% ^
+:: -Wl,-q keeps relocations in the ELF. vita-elf-create turns them into .sce.rel so
+:: the loader can relocate the module (real hardware randomizes the load address).
+arm-vita-eabi-gcc -o "%BUILD%\%TARGET%.elf" %OBJ% %ARCH% -Wl,-q ^
     -lSceCtrl_stub -lSceDisplay_stub -lSceSysmem_stub -lSceLibKernel_stub -lm
 if errorlevel 1 goto :fail
 :: ---------------------------------------------------------------
