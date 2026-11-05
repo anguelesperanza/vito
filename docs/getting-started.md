@@ -8,7 +8,9 @@ under [Not verified](#not-verified).
 **Tested with:** Windows 11, Odin `dev-2026-11:e28f5d1ff`, VitaSDK `2026.08`
 (`arm-vita-eabi-gcc` 15.2.0), Vita3K v0.2.1, and a hacked PS Vita.
 The template and the vita2d example were run on the emulator **and** on real
-hardware. The touch example was run on real hardware only.
+hardware. The touch example was run on real hardware only. The audio example
+ran on both (the emulator's audio was fine from the start; the hardware needed the
+double-buffering fix in gotcha 13).
 
 ---
 
@@ -61,6 +63,9 @@ cd Examples\Vita2D-Example   # vita2d demo, needs libvita2d
 
 cd Examples\Touch-Example    # front + back touch panels, drawn with vita2d
 .\build.bat                  # -> Touch-Example.vpk
+
+cd Examples\Audio-Example    # 4-key synthesizer: audio output + a thread
+.\build.bat                  # -> Audio-Example.vpk
 ```
 
 Settings at the top of each `build.bat`:
@@ -84,6 +89,7 @@ left stick moves things and Cross toggles a colour (and logs `CROSS pressed`).
 | `NewProjectTemplate`      | `ODIN00001` | Scrolling gradient + a movable white square (raw framebuffer)        |
 | `Examples/Vita2D-Example` | `ODIN00002` | vita2d: rotating/scaling sprite, circles, line, text, tint           |
 | `Examples/Touch-Example`  | `ODIN00003` | Front touches (cyan circles + trail), back touches (magenta squares), live coordinates. Cross clears the trail |
+| `Examples/Audio-Example`  | `ODIN00004` | Hold Cross / Circle / Square / Triangle to play C4 / E4 / G4 / C5 (sine voices on an audio thread). D-pad Up/Down: octave. Left/right shoulder: volume. Level meter on screen |
 
 ### Touch input
 
@@ -99,6 +105,35 @@ integers, so it needs no float bridge.
   in `make_panel` / `to_screen`, with the known panel sizes as a fallback.
 - The back panel has a different active area (about 1920x890), so use its own
   `sceTouchGetPanelInfo`, not the front's.
+
+### Audio output and threads
+
+`lib/sce/audio.odin` binds `SceAudioOut` (link `-lSceAudio_stub`) and
+`lib/sce/thread.odin` binds the thread calls (link `-lSceLibKernel_stub` and
+`-lSceKernelThreadMgr_stub`). Everything is integer or pointer arguments, so no
+float bridge is needed.
+
+- Open a port: `sceAudioOutOpenPort(.MAIN, grain, 48000, .MONO)`. `grain` is the
+  number of samples per buffer, a multiple of 64 (the example uses 1024, about
+  21 ms). A `.MONO` port takes one `i16` per sample.
+- Feed it with `sceAudioOutOutput(port, buf)`. This call **blocks**, so run it on
+  its own thread, not in the render loop (a slow frame would starve the audio, and
+  waiting on audio would stall the frame rate).
+- **Use two buffers and alternate them** (gotcha 13).
+- Create the thread with `sceKernelCreateThread(name, entry, priority, stack, 0, 0,
+  nil)` and `sceKernelStartThread`. The entry is a `proc "c" (args: u32, argp:
+  rawptr) -> i32`. The values `THREAD_DEFAULT_PRIORITY_USER` (`0x10000100`) and
+  `THREAD_DEFAULT_STACK_SIZE` (`0x10000`) come from the header's own example.
+- Share flags between threads with `intrinsics.volatile_load` / `volatile_store`
+  on aligned 32-bit values, **not** `intrinsics.atomic_*` (gotcha 14).
+- Shut down by clearing a `running` flag, `sceKernelWaitThreadEnd`, then
+  `sceKernelDeleteThread`, then `sceAudioOutOutput(port, nil)` (waits for the last
+  grain to play out) and `sceAudioOutReleasePort`.
+- `sceAudioOutSetVolume(port, L_CH | R_CH, &vols[0])` takes a pointer to two `i32`
+  (left, right), each 0..32768.
+- The example's audio thread uses integer math only (a check of the generated
+  assembly found no float instructions in it). It builds its sine table with
+  `math.sin` on the main thread before the thread starts, then only reads the table.
 
 ---
 
@@ -290,6 +325,25 @@ These all caused a real failure while setting this up.
 12. **Check the Odin object for stray libm calls** (see the float ABI section).
     A `sinf` without the `vito_` prefix links and runs without any error and
     returns wrong values.
+13. **Audio: alternate two buffers.** `sceAudioOutOutput` returns before the
+    hardware has finished reading the buffer you gave it. Refilling the same buffer
+    straight away corrupts the audio still playing: on real hardware this was a
+    low buzz at the grain rate (about 47 Hz for 1024 samples at 48 kHz), heard
+    under the notes like a second, lower sound. Vita3K copies the buffer at once
+    and hides it. Fill buffer A while B plays, then swap. The example's buffers are
+    also 64-byte aligned.
+14. **Do not use `intrinsics.atomic_*` for shared flags.** Odin targets ARMv6 by
+    default, so atomics compile to a CP15 `mcr p15, 0, rX, c7, c10, 5` barrier,
+    which is deprecated on the Vita's Cortex-A9 and may raise an undefined
+    instruction fault. Whether it actually does on the Vita was **not tested**; the
+    example avoids the question by using `intrinsics.volatile_load` /
+    `volatile_store` on independent aligned 32-bit values, which emit no barrier.
+    To check a build: look for `mcr`, `ldrex`, `strex` or `dmb` in `odin_asm\*.s`.
+    Anything that needs ordering between several values needs a different approach.
+15. **The handheld's shoulder buttons are `CTRL_LTRIGGER` / `CTRL_RTRIGGER`, not
+    `CTRL_L1` / `CTRL_R1`.** A volume control that only listened for `L1`/`R1`
+    never reacted on the real Vita. The example accepts both pairs. (`L1`/`R1`
+    are the PS TV / DualShock buttons. The header calls the trigger pair "L2/R2".)
 
 ---
 
@@ -320,6 +374,19 @@ These all caused a real failure while setting this up.
   but not exercised. The touch example has not been run in Vita3K, and how that
   emulator handles the back panel is unknown. The region and "Ext" `SceTouch`
   functions are not bound.
-- **Libraries beyond `SceCtrl`, `SceDisplay`, `SceSysmem`, `SceLibKernel`, `SceTouch`
-  and `vita2d`.** No audio, networking, file I/O, motion sensors or 3D (`SceGxm`)
-  bindings yet.
+- **Audio beyond what the example uses.** Confirmed on hardware: opening a `MAIN`
+  mono port at 48 kHz with 1024-sample grains, double-buffered `sceAudioOutOutput`
+  from a thread, `sceAudioOutSetVolume` (both channels), and the `nil` drain call.
+  Bound but not exercised: `sceAudioOutSetConfig`/`GetConfig`, `SetAlcMode`,
+  `GetAdopt`, stereo mode, the `BGM` and `VOICE` port types, other sample rates and
+  grain sizes. The D-pad octave control and playing several keys at once were not
+  explicitly confirmed. `SceAudioIn` (microphone) and the audio decoder/encoder
+  libraries are not bound.
+- **Threads beyond the example.** Used: `sceKernelCreateThread`,
+  `sceKernelStartThread`, `sceKernelWaitThreadEnd`, `sceKernelDeleteThread`,
+  `sceKernelExitThread`. `sceKernelExitDeleteThread` is bound but unused. Thread
+  priority and CPU affinity were left at the defaults and not tuned. There are no
+  mutex, semaphore or event-flag bindings.
+- **Libraries beyond `SceCtrl`, `SceDisplay`, `SceSysmem`, `SceLibKernel`, `SceTouch`,
+  `SceAudio`, `SceKernelThreadMgr` and `vita2d`.** No networking, file I/O, motion
+  sensors or 3D (`SceGxm`) bindings yet.

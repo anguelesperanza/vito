@@ -19,6 +19,8 @@ CTRL_UP       :: u32(0x00000010)
 CTRL_RIGHT    :: u32(0x00000020)
 CTRL_DOWN     :: u32(0x00000040)
 CTRL_LEFT     :: u32(0x00000080)
+// The handheld's L / R shoulder buttons are reported as LTRIGGER / RTRIGGER.
+// L1 / R1 are the PS TV / DualShock buttons and did not fire on a real Vita.
 CTRL_LTRIGGER :: u32(0x00000100)
 CTRL_RTRIGGER :: u32(0x00000200)
 CTRL_L1       :: u32(0x00000400)

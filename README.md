@@ -5,7 +5,7 @@ Vito, if it pans out, is meant to become a part of Matchbox as the third target 
 This repo would serve as a way to host the stand along bindings / code that Matchbox will use for it.
 
 POC / WIP. `build.bat` turns Odin source into a `.vpk`. The raw-framebuffer demo and the vita2d demo (sprites, shapes, text)
-run in Vita3K and on a real (hacked) PS Vita; the touch demo has been run on the hardware. Float arguments go through C bridge wrappers.
+and the audio demo run in Vita3K and on a real (hacked) PS Vita; the touch demo has been run on the hardware. Float arguments go through C bridge wrappers.
 Only a small slice of the Vita API is bound so far.
 
 See [docs/getting-started.md](docs/getting-started.md) for setup, how the build works, the float ABI problem, and the
@@ -16,12 +16,15 @@ lib/
   bridge_utils.h      u2f / f2u helpers for float ABI bridge .c files
   sce/sce.odin        bindings: SceCtrl, SceDisplay, SceSysmem, SceLibKernel (partial)
   sce/touch.odin      bindings: SceTouch (front + back panels)
+  sce/audio.odin      bindings: SceAudioOut (PCM output)
+  sce/thread.odin     bindings: thread create/start/wait/delete
   vita2d/             libvita2d bindings + bridge.c (float wrappers)
   libm/               bridge.c + redefine.syms: makes math.sin/cos/min/max work (hard-float libm)
 NewProjectTemplate/   main.odin, main.c, build.bat -> MyGame.vpk (framebuffer demo)
 Examples/
   Vita2D-Example/     vita2d demo -> Vita2D-Example.vpk
   Touch-Example/      front + back touch demo -> Touch-Example.vpk
+  Audio-Example/      4-key synthesizer (audio thread) -> Audio-Example.vpk
 docs/                 setup guide
 ```
 
