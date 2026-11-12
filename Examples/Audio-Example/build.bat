@@ -26,6 +26,8 @@ set BUILD=build
 set ODINASM=odin_asm
 set LIB=..\..\lib
 set BRIDGES=libm vita2d
+:: Optimisation level for the bridge .c files.
+set BRIDGE_OPT=-O2
 set ARCH=-march=armv7-a -mtune=cortex-a9 -mfpu=neon -mfloat-abi=hard
 :: ---------------------------------------------------------------
 :: Clean previous build
@@ -41,7 +43,7 @@ echo === Building %TARGET% ===
 :: ---------------------------------------------------------------
 echo.
 echo Building Odin assembly...
-odin build . -target:freestanding_arm32 -o:speed -build-mode:asm -no-entry-point -min-link-libs -no-thread-local
+odin build . -target:freestanding_arm32 -o:speed -build-mode:asm -no-entry-point -min-link-libs -no-thread-local -microarch:cortex-a9
 if errorlevel 1 goto :fail
 for %%f in (*.S) do (
     ren "%%f" "%%~nf.odin.s"
@@ -73,7 +75,7 @@ echo.
 echo Compiling lib bridges...
 for %%b in (%BRIDGES%) do (
     echo  - %LIB%\%%b\bridge.c
-    arm-vita-eabi-gcc -c "%LIB%\%%b\bridge.c" -o "%BUILD%\%%b_bridge.o" %ARCH%
+    arm-vita-eabi-gcc -c "%LIB%\%%b\bridge.c" -o "%BUILD%\%%b_bridge.o" %ARCH% %BRIDGE_OPT%
     if errorlevel 1 goto :fail
 )
 :: ---------------------------------------------------------------
@@ -85,7 +87,11 @@ echo.
 echo Linking ELF...
 :: -Wl,-q keeps relocations in the ELF. vita-elf-create turns them into .sce.rel so
 :: the loader can relocate the module (real hardware randomizes the load address).
-arm-vita-eabi-gcc -o "%BUILD%\%TARGET%.elf" %OBJ% %ARCH% -Wl,-q ^
+:: __sce_headroom leaves 64 KiB between the code and data segments. vita-elf-create
+:: appends its SCE metadata to the code segment without checking that it fits; when
+:: the code ended just below a 64 KiB boundary it overflowed and the tool crashed
+:: (exit -1073740940, then "Cannot generate module NID" from vita-make-fself).
+arm-vita-eabi-gcc -o "%BUILD%\%TARGET%.elf" %OBJ% %ARCH% -Wl,-q -Wl,--defsym,__sce_headroom=0x10000 ^
     -lvita2d -lSceDisplay_stub -lSceGxm_stub -lSceSysmodule_stub -lSceCtrl_stub -lSceAudio_stub -lSceKernelThreadMgr_stub ^
     -lScePgf_stub -lScePvf_stub -lSceCommonDialog_stub -lSceAppMgr_stub -lSceSysmem_stub -lSceLibKernel_stub ^
     -lfreetype -lpng16 -ljpeg -lz -lbz2 -lm
@@ -96,12 +102,18 @@ if errorlevel 1 goto :fail
 echo.
 echo Packaging VPK...
 vita-elf-create "%BUILD%\%TARGET%.elf" "%BUILD%\%TARGET%.velf"
-if errorlevel 1 goto :fail
+REM A crash gives a negative exit code, which "if errorlevel 1" does not catch.
+if not "%errorlevel%"=="0" goto :fail
 vita-make-fself -c "%BUILD%\%TARGET%.velf" "%BUILD%\eboot.bin"
 if errorlevel 1 goto :fail
 vita-mksfoex -s TITLE_ID=%TITLE_ID% "%TITLE%" "%BUILD%\param.sfo"
 if errorlevel 1 goto :fail
-vita-pack-vpk -s "%BUILD%\param.sfo" -b "%BUILD%\eboot.bin" "%TARGET%.vpk"
+:: Everything in assets\ is packed as app0:/assets/..., and sce_sys\ (LiveArea icon and
+:: pictures; see tools\make_livearea.py) as sce_sys/... A folder that does not exist is skipped.
+set VPK_ADD=
+if exist assets  set VPK_ADD=!VPK_ADD! -a assets=assets
+if exist sce_sys set VPK_ADD=!VPK_ADD! -a sce_sys=sce_sys
+vita-pack-vpk -s "%BUILD%\param.sfo" -b "%BUILD%\eboot.bin" !VPK_ADD! "%TARGET%.vpk"
 if errorlevel 1 goto :fail
 echo.
 echo Build complete: %TARGET%.vpk

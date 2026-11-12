@@ -10,3 +10,7 @@ odin_asm/
 *.velf
 *.vpk
 error-screenshots/
+Examples/*/assets/font.ttf
+
+# binding generator scratch (preprocessed headers, GCC probes, link check)
+tools/bindgen/work/

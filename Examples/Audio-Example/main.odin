@@ -202,7 +202,7 @@ game_main :: proc "c" (argc: i32, argv: [^]cstring) -> i32 {
     shared.running = 1
     sce.sceClibPrintf("audio port %d opened (grain %d, %d Hz, mono)\n", port, i32(GRAIN), i32(SAMPLE_RATE))
 
-    volume := sce.AUDIO_OUT_MAX_VOL / 2
+    volume: i32 = sce.AUDIO_OUT_MAX_VOL / 2
     vols   := [2]i32{volume, volume}
     r := sce.sceAudioOutSetVolume(port, sce.AUDIO_VOLUME_FLAG_L_CH | sce.AUDIO_VOLUME_FLAG_R_CH, &vols[0])
     sce.sceClibPrintf("SetVolume(%d) -> 0x%08x\n", volume, u32(r))
@@ -279,7 +279,7 @@ game_main :: proc "c" (argc: i32, argv: [^]cstring) -> i32 {
             lit := pad.buttons & keys[v].button != 0
             v2d.DrawRectangle(x, 150, 200, 200, lit ? pad_colors[v] : dim)
             if font != nil {
-                v2d.PvfDrawText(font, i32(x) + 14, 260, white, 1.0, keys[v].name)
+                v2d.DrawText(i32(x) + 14, 260, white, 1.0, keys[v].name)
             }
         }
 
@@ -288,8 +288,8 @@ game_main :: proc "c" (argc: i32, argv: [^]cstring) -> i32 {
         v2d.DrawRectangle(60, 400, 840 * level, 28, yellow)
 
         if font != nil {
-            v2d.PvfDrawText(font, 24, 40, white, 1.4, "Audio example")
-            v2d.PvfDrawText(font, 24, 70, white, 0.9, "Hold Cross / Circle / Square / Triangle to play.  Up/Down: octave   L1/R1: volume   Start: exit")
+            v2d.DrawText(24, 40, white, 1.4, "Audio example")
+            v2d.DrawText(24, 70, white, 0.9, "Hold Cross / Circle / Square / Triangle to play.  Up/Down: octave   L1/R1: volume   Start: exit")
 
             n := 0
             put_str(buf[:], &n, "octave ")
@@ -298,7 +298,7 @@ game_main :: proc "c" (argc: i32, argv: [^]cstring) -> i32 {
             put_int(buf[:], &n, volume * 100 / sce.AUDIO_OUT_MAX_VOL)
             put_str(buf[:], &n, "%    queued samples ")
             put_int(buf[:], &n, sce.sceAudioOutGetRestSample(port))
-            v2d.PvfDrawText(font, 24, 480, yellow, 1.0, finish(buf[:], n))
+            v2d.DrawText(24, 480, yellow, 1.0, finish(buf[:], n))
         }
 
         v2d.EndDrawing()
@@ -317,6 +317,7 @@ game_main :: proc "c" (argc: i32, argv: [^]cstring) -> i32 {
     // Graphics: see docs/getting-started.md, gotchas 10 and 11.
     v2d.WaitRenderingDone()
     if font != nil do v2d.FreePvf(font)
+    v2d.FreeSizedFonts()
     sce.sceKernelExitProcess(0)
     return 0
 }

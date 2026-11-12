@@ -66,6 +66,12 @@ cd Examples\Touch-Example    # front + back touch panels, drawn with vita2d
 
 cd Examples\Audio-Example    # 4-key synthesizer: audio output + a thread
 .\build.bat                  # -> Audio-Example.vpk
+
+cd Examples\Runtime-Example  # allocator, fmt, maps, log, threads, assertions
+.\build.bat                  # -> Runtime-Example.vpk
+
+cd Examples\SaveData-Example # save file, SceAppUtil, power, assets, LiveArea
+.\build.bat                  # -> SaveData-Example.vpk
 ```
 
 Settings at the top of each `build.bat`:
@@ -91,6 +97,80 @@ left stick moves things and Cross toggles a colour (and logs `CROSS pressed`).
 | `Examples/Touch-Example`  | `ODIN00003` | Front touches (cyan circles + trail), back touches (magenta squares), live coordinates. Cross clears the trail |
 | `Examples/Audio-Example`  | `ODIN00004` | Hold Cross / Circle / Square / Triangle to play C4 / E4 / G4 / C5 (sine voices on an audio thread). D-pad Up/Down: octave. Left/right shoulder: volume. Level meter on screen |
 
+### The Odin runtime (`lib/vito`)
+
+On `freestanding_arm32` Odin's default allocator is the nil allocator and its
+assertion handler prints nothing. So without help, `new`, `make`, `append`, maps,
+`strings.Builder`, `fmt.tprintf` and `core:log` silently do nothing, and a failed
+`assert` just traps. `lib/vito` fills that in. Start the entry procedure with:
+
+```odin
+context = vito.init()      // instead of runtime.default_context()
+```
+
+- **Heap:** `context.allocator` is newlib's `malloc` family (integer-only calls, no
+  bridge). newlib takes one block at start-up, 128 MiB by default; to change it,
+  define `unsigned int _newlib_heap_size_user` in `main.c` (the template has the line
+  commented out).
+- **Temp allocator:** a growing arena (1 MiB first block). Call
+  `free_all(context.temp_allocator)` once per frame.
+- **Other threads and callbacks:** every `proc "c"` needs its own
+  `context = vito.thread_context()`. That context shares the heap (newlib locks it)
+  but its temp allocator is the heap, because the arena is not thread-safe.
+- **Printing:** `vito.print` / `println` / `printf` format with `core:fmt` into a
+  1 KiB stack buffer and write through `sceClibPrintf`. `context.logger` is set, so
+  `core:log` works.
+- **Assertions and `panic`:** the message and source location are printed, appended to
+  `ux0:data/vito_panic.log` (a console has no log window), and then the program traps,
+  which gives the crash screen and a core dump. `vito.panic_action = .Exit` closes the
+  app quietly instead. Bounds-check failures do not go through this handler: the Odin
+  runtime traps on those directly with no message.
+- `vito.init()` also runs Odin's global initialisers and `@(init)` procedures. Nothing
+  else does, because the build uses `-no-entry-point`.
+- Link `-lSceIofilemgr_stub` as well (for the panic log).
+
+`core:fmt`, `core:log`, `core:strings`, `core:strconv`, `core:slice`, `core:math` and
+`core:math/linalg` all build for this target. `Examples/Runtime-Example` runs twelve
+checks over them and shows PASS or FAIL for each; Triangle fails an assertion on
+purpose. All twelve checks pass on a real Vita, and the on-purpose assertion gives the
+crash screen, a core dump and the line in `ux0:data/vito_panic.log`. Not tried in Vita3K.
+
+### Assets, LiveArea and save data
+
+**Assets.** `build.bat` packs the project's `assets\` folder into the VPK. At run time
+the files are under `app0:/assets/` (read-only), e.g.
+`v2d.LoadPNGFile("app0:/assets/test.png")` or `sce.sceIoOpen("app0:/assets/level1.bin", ...)`.
+
+**LiveArea (the bubble and its screen).** `build.bat` also packs `sce_sys\` when it
+exists. The files and their required sizes:
+
+| File | Size | What it is |
+|---|---|---|
+| `sce_sys\icon0.png` | 128 x 128 | the bubble on the home screen |
+| `sce_sys\pic0.png` | 960 x 544 | shown while the app loads |
+| `sce_sys\livearea\contents\bg.png` | 840 x 500 | LiveArea background |
+| `sce_sys\livearea\contents\startup.png` | 280 x 158 | the picture you press to start |
+| `sce_sys\livearea\contents\template.xml` | | names the two images above |
+
+Every PNG must be exactly that size and **8-bit indexed colour** (a 256-entry palette),
+not truecolour. `python tools\make_livearea.py <project folder> "Title"` writes
+placeholder images that follow the rules (it needs Pillow); replace them with your own
+art converted the same way, for example with `pngquant 256`. Without `sce_sys\` the
+bubble gets the system's default icon.
+
+**Save data.** Call `sceAppUtilInit` once (both parameter structs zeroed) before using
+save data or `sceAppUtilSystemParamGet*`. `Examples/SaveData-Example` writes a small
+struct to `savedata0:/save.bin`, the app's own save area, and falls back to
+`ux0:data/<title id>/` if that cannot be written; the screen shows which one was used.
+It also creates a save-data slot (the title and subtitle the system shows for a save),
+reads the language, the enter button (Circle or Cross, by region) and the user name,
+and shows battery and clock speeds from `ScePower`. Link `-lSceAppUtil_stub
+-lScePower_stub -lSceRtc_stub -lSceIofilemgr_stub`.
+
+Confirmed on a real Vita: the score and launch count survive closing and restarting
+the app. Not recorded yet: which of the two save locations was used, whether the slot
+line is green, and whether the bubble shows the custom icon.
+
 ### Touch input
 
 `lib/sce/touch.odin` binds `SceTouch` (link `-lSceTouch_stub`). All arguments are
@@ -108,8 +188,8 @@ integers, so it needs no float bridge.
 
 ### Audio output and threads
 
-`lib/sce/audio.odin` binds `SceAudioOut` (link `-lSceAudio_stub`) and
-`lib/sce/thread.odin` binds the thread calls (link `-lSceLibKernel_stub` and
+`lib/sce/audioout.odin` binds `SceAudioOut` (link `-lSceAudio_stub`) and
+`lib/sce/kernel_threadmgr_thread.odin` binds the thread calls (link `-lSceLibKernel_stub` and
 `-lSceKernelThreadMgr_stub`). Everything is integer or pointer arguments, so no
 float bridge is needed.
 
@@ -125,7 +205,8 @@ float bridge is needed.
   rawptr) -> i32`. The values `THREAD_DEFAULT_PRIORITY_USER` (`0x10000100`) and
   `THREAD_DEFAULT_STACK_SIZE` (`0x10000`) come from the header's own example.
 - Share flags between threads with `intrinsics.volatile_load` / `volatile_store`
-  on aligned 32-bit values, **not** `intrinsics.atomic_*` (gotcha 14).
+  on aligned 32-bit values (what the example does), or with `intrinsics.atomic_*`
+  now that the build targets the Cortex-A9 (gotcha 14).
 - Shut down by clearing a `running` flag, `sceKernelWaitThreadEnd`, then
   `sceKernelDeleteThread`, then `sceAudioOutOutput(port, nil)` (waits for the last
   grain to play out) and `sceAudioOutReleasePort`.
@@ -142,7 +223,7 @@ float bridge is needed.
 ```
 main.odin
    │  odin build . -target:freestanding_arm32 -build-mode:asm -no-entry-point
-   ▼                -min-link-libs -no-thread-local -o:speed
+   ▼                -min-link-libs -no-thread-local -o:speed -microarch:cortex-a9
 ARM assembly (.S)
    │  arm-vita-eabi-gcc -c  -march=armv7-a -mtune=cortex-a9 -mfpu=neon -mfloat-abi=hard
    ▼
@@ -177,7 +258,7 @@ VitaSDK's libraries are compiled **hard-float**: they expect floats in `s0`,
 both, so only functions touching floats are affected. Calling them directly does
 not fail to link or crash; it passes garbage silently.
 
-There are two places this shows up, and both are handled:
+There are three places this shows up, and all are handled:
 
 1. **Library functions with float parameters** (vita2d). `lib/vita2d/bridge.c`
    has wrappers that take every float as `uint32_t`, convert with `u2f()` from
@@ -192,8 +273,17 @@ There are two places this shows up, and both are handled:
    `vito_cosf`, ... (float bits in and out through integer registers), and
    `build.bat` renames the symbols **inside the Odin object only** with
    `objcopy --redefine-syms=lib\libm\redefine.syms`. vita2d and newlib keep
-   calling the real functions. To cover another libm function add it to
-   `lib/libm/bridge.c` and `lib/libm/redefine.syms`.
+   calling the real functions.
+
+   `redefine.syms` lists **every** libm function (308 names, written by
+   `tools/gen_libm_syms.py`), not only the wrapped ones. A libm call with no wrapper
+   therefore fails at link time with ``undefined reference to `vito_<name>'``, and the
+   fix is to add that function to `lib/libm/bridge.c`. Before this, such a call linked
+   and returned garbage.
+3. **libgcc helpers for 64-bit integer and float conversions.** `i64(some_float)` and
+   `f64(some_u64)` compile to calls to `__fixdfdi`, `__floatundidf` and friends, which
+   are hard-float in VitaSDK's libgcc. `core:fmt` and `core:strconv` use them when they
+   print or parse floats. They are renamed and wrapped the same way.
 
 To check what an Odin object calls:
 
@@ -206,9 +296,44 @@ Anything that looks like a libm name (`sinf`, `powf`, `fmodf`, ...) without a
 startup (`selftest sin(1)*1e6=841470 cos(1)*1e6=540302 max(2x,-3x)=2`) to prove
 the libm bridge works.
 
-## Writing bindings
+## The `sce` bindings are generated
 
-Look at the real headers before writing a struct or constant:
+`lib/sce/` covers the whole user-mode SDK (`psp2/*.h`, `psp2common/*.h`): 123 files,
+1,649 functions. They are written by `tools/bindgen/gen.py`, not by hand:
+
+```
+python tools\bindgen\gen.py          # rewrites lib\sce\*.odin, lib\sce\bridge.c, tools\bindgen\report.md
+python tools\bindgen\linkcheck.py    # links every bound function against the stub libraries
+```
+
+It needs Python 3 with `pycparser`. Run it again after updating VitaSDK.
+
+- The generator parses the real headers and takes every struct size, field offset,
+  enum value and macro value **from GCC** (it compiles a probe file), so nothing is
+  typed from memory. Each struct has an `#assert(size_of(...))`; the generator also
+  checks all 1,818 field offsets against GCC with `odin check`.
+- It looks up which stub library exports each function. The comment at the top of
+  each file lists the `-l` flags to add to `build.bat`.
+- Files that start with `// GENERATED` must not be edited. Hand-written code goes in
+  `sce.odin` (naming rules), `inline.odin` (the headers' `static inline` functions and
+  macros, ported) and `helpers.odin`.
+- `tools/bindgen/report.md` lists what was generated and what was left out.
+
+Naming: functions keep their names; `SceCtrlData` becomes `sce.CtrlData`;
+`SCE_CTRL_CROSS` becomes `sce.CTRL_CROSS`. An enum becomes an Odin enum
+(`sce.TouchSamplingState.START`) only when a function or struct actually uses that
+type; bit flags, error codes and enums nothing takes by type are plain constants.
+Error codes are written so they compare directly with the `i32` a function returns
+(`if ret == sce.CTRL_ERROR_INVALID_ARG`).
+
+**Verified by the tools, not on a console:** names, layouts, values, link libraries.
+**Not verified:** behaviour. Only the functions the examples call have run on a Vita
+or in Vita3K; see [Not verified](#not-verified).
+
+## Writing bindings for other libraries
+
+For libraries outside the SDK (as `lib/vita2d` was), look at the real headers before
+writing a struct or constant:
 
 ```
 C:\vitasdk\arm-vita-eabi\include\psp2\          (e.g. ctrl.h, display.h, gxm.h)
@@ -225,8 +350,13 @@ To find which stub library provides a function:
 arm-vita-eabi-nm C:\vitasdk\arm-vita-eabi\lib\libSceAppMgr_stub.a | findstr sceSharedFbOpen
 ```
 
-`lib/sce/sce.odin` has `#assert(size_of(...))` checks for the structs whose
-sizes the headers pin down. Keep doing this for new structs.
+Add `#assert(size_of(...))` for every struct, with the size taken from the compiler
+(`sizeof` in a small C file built with `arm-vita-eabi-gcc -S`), not worked out by hand.
+
+**Enums are not always 4 bytes.** VitaSDK's GCC uses short enums: `sizeof` of an enum
+whose values fit in a byte is 1. This changes struct layouts and anything written
+through a pointer. In `lib/sce` every Odin enum is 32-bit (so arguments fill the whole
+register) and a struct field whose C type is a short enum is declared as `u8`/`u16`.
 
 The link line `vita2d` needs (in `Examples/Vita2D-Example/build.bat`):
 
@@ -332,14 +462,41 @@ These all caused a real failure while setting this up.
     under the notes like a second, lower sound. Vita3K copies the buffer at once
     and hides it. Fill buffer A while B plays, then swap. The example's buffers are
     also 64-byte aligned.
-14. **Do not use `intrinsics.atomic_*` for shared flags.** Odin targets ARMv6 by
-    default, so atomics compile to a CP15 `mcr p15, 0, rX, c7, c10, 5` barrier,
-    which is deprecated on the Vita's Cortex-A9 and may raise an undefined
-    instruction fault. Whether it actually does on the Vita was **not tested**; the
-    example avoids the question by using `intrinsics.volatile_load` /
-    `volatile_store` on independent aligned 32-bit values, which emit no barrier.
-    To check a build: look for `mcr`, `ldrex`, `strex` or `dmb` in `odin_asm\*.s`.
-    Anything that needs ordering between several values needs a different approach.
+14. **Build with `-microarch:cortex-a9`** (every `build.bat` does). Without it Odin
+    targets ARMv6 (`arm1176jzf-s`), and `intrinsics.atomic_*` compiles to a CP15
+    `mcr p15, 0, rX, c7, c10, 5` barrier, which is deprecated on the Vita's Cortex-A9
+    and may raise an undefined instruction fault (never tested). With the flag the
+    same code uses `dmb ish` and `ldrex`/`strex`, which are normal ARMv7. To check a
+    build: there must be no `mcr` in `odin_asm\*.s`. The flag was added after the
+    examples were last run on hardware, so **re-run them on a Vita** before relying
+    on it; the audio example still uses `volatile_load` / `volatile_store`.
+17. **Do not shrink text with `PvfDrawText`'s `scale`.** vita2d rasterises each PVF
+    glyph once at 10.125 pt (18 px) and draws other sizes by scaling that bitmap on
+    the GPU. Its glyph atlas minifies with point sampling, so a scale below 1.0 drops
+    pixel rows and columns, and its pen position is an `int`, so each scaled advance
+    is truncated and letters crowd together (most visible in text that changes).
+    Use `v2d.DrawText(x, y, color, scale, text)` from `lib/vita2d/text.odin`: it keeps
+    one font per size, rasterised at that size (`PvfSetBaseScale`, a vito addition in
+    `lib/vita2d/bridge.c` that reaches into vita2d's font struct), and draws at scale
+    1.0. The PVF page of `Vita2D-Full-Example` shows both side by side. The PGF text
+    functions scale a bitmap the same way and have no such helper yet. Confirmed
+    fixed on a real Vita.
+18. **Link with `-Wl,--defsym,__sce_headroom=0x10000`** (every `build.bat` does).
+    `vita-elf-create` appends its SCE metadata (module info, import tables, NIDs;
+    2,752 bytes for the audio example, more with more imports) to the end of the code
+    segment and does not check that it fits before the data segment. The linker puts
+    the data segment at the next 64 KiB boundary, so when the code happened to end
+    less than that many bytes below a boundary, the tool wrote past the gap, corrupted
+    its own heap and crashed with no message (exit code -1073740940). The next step,
+    `vita-make-fself`, then printed `Cannot generate module NID: No such file or
+    directory`. It looked random because any change in code size moved it; changing
+    `BRIDGE_OPT` only shifted the layout. VitaSDK's linker script has a symbol for this,
+    `__sce_headroom`, which adds that much space before the data segment. Measured: the
+    failing layout packs with it, and fails without it for every code end within the
+    last 2.7 KB of a 64 KiB block. `build.bat` also now stops if `vita-elf-create`
+    crashes: `if errorlevel 1` does not catch a negative exit code.
+16. **Do not edit `.bat` files with Git Bash `sed -i`.** It rewrote them with LF
+    endings, which then ran the wrong script (gotcha 1).
 15. **The handheld's shoulder buttons are `CTRL_LTRIGGER` / `CTRL_RTRIGGER`, not
     `CTRL_L1` / `CTRL_R1`.** A volume control that only listened for `L1`/`R1`
     never reacted on the real Vita. The example accepts both pairs. (`L1`/`R1`
@@ -349,10 +506,18 @@ These all caused a real failure while setting this up.
 
 ## Not verified
 
-- **64-bit arguments.** On ARM32, `u64` arguments must start in an even-numbered
-  register. The O3DX (3DS) project found Odin's `freestanding_arm32` does not
-  insert that padding. Not yet checked for the Vita; no function bound so far
-  takes a `u64`. Bind such functions through a `bridge.c` wrapper and test them on hardware.
+- **The generated `sce` bindings beyond what the examples call.** They link and their
+  layouts match GCC, but most of the 1,649 functions have never been called on a Vita.
+- **64-bit arguments: checked in the assembly, not yet on hardware.** On ARM32 a `u64`
+  argument must start in an even-numbered register. O3DX found an older Odin did not
+  do that. Odin `dev-2026-11` does: for `proc "c" (a: i32, b: u64)` it puts `b` in
+  `r2:r3`, and with three or more integer arguments before it the `u64` goes on the
+  stack 8-byte aligned. Small structs by value, struct returns, narrow integers and C
+  variadics were checked the same way and match the AAPCS. So functions such as
+  `sceIoLseek` are bound directly, with no bridge. Only `float`/`double` by value still
+  needs one. Calling one of these on a Vita is still to do.
+- **`-microarch:cortex-a9`** (gotcha 14): all examples build with it; none has been
+  re-run on hardware or in Vita3K since it was added.
 - **Double-precision (`f64`) libm wrappers.** `lib/libm/bridge.c` also defines
   the `double` versions (`vito_sin`, ...), but only the `float` versions have
   been exercised.
@@ -372,21 +537,15 @@ These all caused a real failure while setting this up.
   `sceTouchRead`, `sceTouchGetSamplingState`, `sceTouchEnableTouchForce` /
   `DisableTouchForce`, the `force` value and the `HIDE_UPPER_LAYER` flag are bound
   but not exercised. The touch example has not been run in Vita3K, and how that
-  emulator handles the back panel is unknown. The region and "Ext" `SceTouch`
-  functions are not bound.
+  emulator handles the back panel is unknown. 
 - **Audio beyond what the example uses.** Confirmed on hardware: opening a `MAIN`
   mono port at 48 kHz with 1024-sample grains, double-buffered `sceAudioOutOutput`
   from a thread, `sceAudioOutSetVolume` (both channels), and the `nil` drain call.
   Bound but not exercised: `sceAudioOutSetConfig`/`GetConfig`, `SetAlcMode`,
   `GetAdopt`, stereo mode, the `BGM` and `VOICE` port types, other sample rates and
   grain sizes. The D-pad octave control and playing several keys at once were not
-  explicitly confirmed. `SceAudioIn` (microphone) and the audio decoder/encoder
-  libraries are not bound.
+  explicitly confirmed.
 - **Threads beyond the example.** Used: `sceKernelCreateThread`,
   `sceKernelStartThread`, `sceKernelWaitThreadEnd`, `sceKernelDeleteThread`,
   `sceKernelExitThread`. `sceKernelExitDeleteThread` is bound but unused. Thread
-  priority and CPU affinity were left at the defaults and not tuned. There are no
-  mutex, semaphore or event-flag bindings.
-- **Libraries beyond `SceCtrl`, `SceDisplay`, `SceSysmem`, `SceLibKernel`, `SceTouch`,
-  `SceAudio`, `SceKernelThreadMgr` and `vita2d`.** No networking, file I/O, motion
-  sensors or 3D (`SceGxm`) bindings yet.
+  priority and CPU affinity were left at the defaults and not tuned.

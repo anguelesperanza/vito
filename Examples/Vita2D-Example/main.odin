@@ -155,10 +155,10 @@ game_main :: proc "c" (argc: i32, argv: [^]cstring) -> i32 {
         v2d.DrawPixel(cursor_x, cursor_y, red)
 
         if font != nil {
-            v2d.PvfDrawText(font, 24, 40, white, 1.4, "Odin + vita2d")
-            v2d.PvfDrawText(font, 24, 70, white, 1.0, "Float arguments cross the C bridge.")
-            v2d.PvfDrawText(font, 24, 100, white, 0.9, "D-pad / left stick: cursor   Cross: tint   Start: exit")
-            v2d.PvfDrawText(font, 24, 520, yellow, 1.0, format_int(buf[:], "frame ", frames))
+            v2d.DrawText(24, 40, white, 1.4, "Odin + vita2d")
+            v2d.DrawText(24, 70, white, 1.0, "Float arguments cross the C bridge.")
+            v2d.DrawText(24, 100, white, 0.9, "D-pad / left stick: cursor   Cross: tint   Start: exit")
+            v2d.DrawText(24, 520, yellow, 1.0, format_int(buf[:], "frame ", frames))
         }
 
         v2d.EndDrawing()
@@ -174,6 +174,7 @@ game_main :: proc "c" (argc: i32, argv: [^]cstring) -> i32 {
     if tex != nil do v2d.FreeTexture(tex)
     sce.sceClibPrintf("exit: freeing font\n")
     if font != nil do v2d.FreePvf(font)
+    v2d.FreeSizedFonts()
     // vita2d_fini hangs inside Vita3K v0.2.1 (the real Vita runs it fine). With
     // the GPU idle, exiting without it is safe: the kernel tears GXM down with
     // the process. Set CALL_FINI to true to run it anyway.

@@ -1,0 +1,2 @@
+Hello from app0:/assets/hello.txt
+0123456789

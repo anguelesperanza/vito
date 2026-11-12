@@ -1,8 +1,7 @@
 package my_game
 
-import "base:runtime"
-
 import sce "../lib/sce"
+import vito "../lib/vito"
 
 SCREEN_W :: sce.DISPLAY_WIDTH
 SCREEN_H :: sce.DISPLAY_HEIGHT
@@ -16,7 +15,9 @@ SQUARE_SPEED :: 6
 // The proc name below can be anything — only the link_name matters.
 @(export, link_name = "odin_main")
 game_main :: proc "c" (argc: i32, argv: [^]cstring) -> i32 {
-    context = runtime.default_context()
+    // Sets up the heap allocator, temp allocator, logger and assertion handler.
+    // Without it new / make / append do nothing on the Vita (see lib/vito).
+    context = vito.init()
 
     sce.sceCtrlSetSamplingMode(.ANALOG)
     sce.sceClibPrintf("odin_main: started\n")
@@ -32,7 +33,7 @@ game_main :: proc "c" (argc: i32, argv: [^]cstring) -> i32 {
 
     frames: [2]sce.DisplayFrameBuf
     for i in 0 ..< 2 {
-        block := sce.sceKernelAllocMemBlock("display", sce.MEMBLOCK_TYPE_USER_CDRAM_RW, fb_size, nil)
+        block := sce.sceKernelAllocMemBlock("display", sce.KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, fb_size, nil)
         if block < 0 {
             sce.sceClibPrintf("sceKernelAllocMemBlock failed: 0x%08x\n", u32(block))
             return sce.sceKernelExitProcess(1)

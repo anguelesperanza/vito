@@ -9,7 +9,10 @@
 // Odin's object only (objcopy --redefine-syms=redefine.syms), so vita2d and
 // newlib themselves keep calling the real functions.
 //
-// To cover another libm function: add it below and to redefine.syms.
+// redefine.syms lists EVERY libm function (tools/gen_libm_syms.py writes it),
+// so a libm call that is not wrapped here fails at link time with
+// "undefined reference to `vito_<name>'" instead of silently misbehaving.
+// To fix that error, add the function below.
 
 #include <math.h>
 #include "../bridge_utils.h"
@@ -27,9 +30,55 @@ static inline uint64_t d2u(double   d) { uint64_t v; memcpy(&v, &d, sizeof v); r
 #define ONE_ARG(X) \
     X(sin) X(cos) X(tan) X(asin) X(acos) X(atan) X(sinh) X(cosh) X(tanh) \
     X(exp) X(exp2) X(log) X(log2) X(log10) X(sqrt) X(cbrt) \
-    X(floor) X(ceil) X(trunc) X(round) X(fabs)
-#define TWO_ARG(X)   X(atan2) X(pow) X(fmod) X(fmin) X(fmax) X(hypot) X(copysign)
+    X(floor) X(ceil) X(trunc) X(round) X(fabs) X(rint) X(nearbyint) \
+    X(asinh) X(acosh) X(atanh) X(expm1) X(log1p)
+#define TWO_ARG(X)   X(atan2) X(pow) X(fmod) X(fmin) X(fmax) X(hypot) X(copysign) X(remainder) X(fdim)
 #define THREE_ARG(X) X(fma)
+
+// ---------------------------------------------------------------
+// libgcc conversion helpers.
+//
+// LLVM calls these for float <-> 64-bit integer conversions, e.g. `i64(x)` or
+// `f64(some_u64)`; core:fmt and core:strconv use them when printing or parsing
+// floats. libgcc's copies are hard-float too, so they need the same treatment.
+// The C casts below compile to the real helpers with the right convention.
+// ---------------------------------------------------------------
+int64_t  vito___fixdfdi(uint64_t a)     { return (int64_t)u2d(a); }
+int64_t  vito___fixsfdi(uint32_t a)     { return (int64_t)u2f(a); }
+uint64_t vito___fixunsdfdi(uint64_t a)  { return (uint64_t)u2d(a); }
+uint64_t vito___fixunssfdi(uint32_t a)  { return (uint64_t)u2f(a); }
+uint64_t vito___floatdidf(int64_t a)    { return d2u((double)a); }
+uint32_t vito___floatdisf(int64_t a)    { return f2u((float)a); }
+uint64_t vito___floatundidf(uint64_t a) { return d2u((double)a); }
+uint32_t vito___floatundisf(uint64_t a) { return f2u((float)a); }
+int32_t  vito___fixdfsi(uint64_t a)     { return (int32_t)u2d(a); }
+int32_t  vito___fixsfsi(uint32_t a)     { return (int32_t)u2f(a); }
+uint32_t vito___fixunsdfsi(uint64_t a)  { return (uint32_t)u2d(a); }
+uint32_t vito___fixunssfsi(uint32_t a)  { return (uint32_t)u2f(a); }
+uint64_t vito___floatsidf(int32_t a)    { return d2u((double)a); }
+uint32_t vito___floatsisf(int32_t a)    { return f2u((float)a); }
+uint64_t vito___floatunsidf(uint32_t a) { return d2u((double)a); }
+uint32_t vito___floatunsisf(uint32_t a) { return f2u((float)a); }
+uint64_t vito___extendsfdf2(uint32_t a) { return d2u((double)u2f(a)); }
+uint32_t vito___truncdfsf2(uint64_t a)  { return f2u((float)u2d(a)); }
+uint64_t vito___powidf2(uint64_t a, int b) { return d2u(__builtin_powi(u2d(a), b)); }
+uint32_t vito___powisf2(uint32_t a, int b) { return f2u(__builtin_powif(u2f(a), b)); }
+
+// Mixed float / integer signatures.
+uint32_t vito_ldexpf(uint32_t a, int e)   { return f2u(ldexpf(u2f(a), e)); }
+uint64_t vito_ldexp(uint64_t a, int e)    { return d2u(ldexp(u2d(a), e)); }
+uint32_t vito_frexpf(uint32_t a, int *e)  { return f2u(frexpf(u2f(a), e)); }
+uint64_t vito_frexp(uint64_t a, int *e)   { return d2u(frexp(u2d(a), e)); }
+uint32_t vito_modff(uint32_t a, float *i) { return f2u(modff(u2f(a), i)); }
+uint64_t vito_modf(uint64_t a, double *i) { return d2u(modf(u2d(a), i)); }
+long      vito_lroundf(uint32_t a)  { return lroundf(u2f(a)); }
+long      vito_lround(uint64_t a)   { return lround(u2d(a)); }
+long long vito_llroundf(uint32_t a) { return llroundf(u2f(a)); }
+long long vito_llround(uint64_t a)  { return llround(u2d(a)); }
+long      vito_lrintf(uint32_t a)   { return lrintf(u2f(a)); }
+long      vito_lrint(uint64_t a)    { return lrint(u2d(a)); }
+long long vito_llrintf(uint32_t a)  { return llrintf(u2f(a)); }
+long long vito_llrint(uint64_t a)   { return llrint(u2d(a)); }
 
 ONE_ARG(F1)
 TWO_ARG(F2)

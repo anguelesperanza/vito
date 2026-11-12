@@ -168,15 +168,15 @@ game_main :: proc "c" (argc: i32, argv: [^]cstring) -> i32 {
         }
 
         if font != nil {
-            v2d.PvfDrawText(font, 24, 40, white, 1.3, "Touch example")
-            v2d.PvfDrawText(font, 24, 68, white, 0.9, "Touch the screen (cyan) or the back panel (magenta).  Cross: clear trail   Start: exit")
+            v2d.DrawText(24, 40, white, 1.3, "Touch example")
+            v2d.DrawText(24, 68, white, 0.9, "Touch the screen (cyan) or the back panel (magenta).  Cross: clear trail   Start: exit")
 
             n := 0
             put_str(buf[:], &n, "front: ")
             put_int(buf[:], &n, i32(f_count))
             put_str(buf[:], &n, "   back: ")
             put_int(buf[:], &n, i32(b_count))
-            v2d.PvfDrawText(font, 24, 100, yellow, 1.0, finish(buf[:], n))
+            v2d.DrawText(24, 100, yellow, 1.0, finish(buf[:], n))
 
             // One line per front touch: id and raw panel coordinates.
             for i in 0 ..< f_count {
@@ -188,7 +188,7 @@ game_main :: proc "c" (argc: i32, argv: [^]cstring) -> i32 {
                 put_int(buf[:], &n, i32(r.x))
                 put_str(buf[:], &n, " y=")
                 put_int(buf[:], &n, i32(r.y))
-                v2d.PvfDrawText(font, 24, 128 + 24 * i32(i), white, 0.85, finish(buf[:], n))
+                v2d.DrawText(24, 128 + 24 * i32(i), white, 0.85, finish(buf[:], n))
             }
             for i in 0 ..< b_count {
                 r := bdata.report[i]
@@ -199,7 +199,7 @@ game_main :: proc "c" (argc: i32, argv: [^]cstring) -> i32 {
                 put_int(buf[:], &n, i32(r.x))
                 put_str(buf[:], &n, " y=")
                 put_int(buf[:], &n, i32(r.y))
-                v2d.PvfDrawText(font, 560, 128 + 24 * i32(i), magenta | 0xFF000000, 0.85, finish(buf[:], n))
+                v2d.DrawText(560, 128 + 24 * i32(i), magenta | 0xFF000000, 0.85, finish(buf[:], n))
             }
         }
 
@@ -212,6 +212,7 @@ game_main :: proc "c" (argc: i32, argv: [^]cstring) -> i32 {
     // (it hangs Vita3K v0.2.1).
     v2d.WaitRenderingDone()
     if font != nil do v2d.FreePvf(font)
+    v2d.FreeSizedFonts()
     sce.sceKernelExitProcess(0)
     return 0
 }
