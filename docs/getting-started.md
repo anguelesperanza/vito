@@ -55,8 +55,11 @@ cannot create the symlink. They are harmless: `libpng16.a` is the real file and
 From **PowerShell or cmd** (not Git Bash, see [Gotchas](#gotchas)):
 
 ```
-cd NewProjectTemplate        # framebuffer demo, no extra libraries
+cd NewProjectTemplate        # a starting point: sprite, text, input and sound (lib/vito + lib/gfx)
 .\build.bat                  # -> MyGame.vpk
+
+cd Examples\Framebuffer-Example   # raw framebuffer, no graphics library (the old template)
+.\build.bat                  # -> Framebuffer-Example.vpk
 
 cd Examples\Vita2D-Example   # vita2d demo, needs libvita2d
 .\build.bat                  # -> Vita2D-Example.vpk
@@ -119,7 +122,8 @@ left stick moves things and Cross toggles a colour (and logs `CROSS pressed`).
 
 | Project                   | Title ID    | What it shows                                                        |
 |---------------------------|-------------|----------------------------------------------------------------------|
-| `NewProjectTemplate`      | `ODIN00001` | Scrolling gradient + a movable white square (raw framebuffer)        |
+| `NewProjectTemplate`      | `ODIN00001` | A sprite moved with the d-pad or left stick, text, a sound on Cross (`lib/vito` + `lib/gfx`). Start + Select held exits |
+| `Examples/Framebuffer-Example` | `ODIN00018` | Scrolling gradient + a movable white square (raw framebuffer). This was the template until 2026-11-13 |
 | `Examples/Vita2D-Example` | `ODIN00002` | vita2d: rotating/scaling sprite, circles, line, text, tint           |
 | `Examples/Touch-Example`  | `ODIN00003` | Front touches (cyan circles + trail), back touches (magenta squares), live coordinates. Cross clears the trail |
 | `Examples/Audio-Example`  | `ODIN00004` | Hold Cross / Circle / Square / Triangle to play C4 / E4 / G4 / C5 (sine voices on an audio thread). D-pad Up/Down: octave. Left/right shoulder: volume. Level meter on screen |

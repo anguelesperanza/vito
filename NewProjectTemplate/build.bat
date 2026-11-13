@@ -25,9 +25,11 @@ if errorlevel 1 (
 set BUILD=build
 set ODINASM=odin_asm
 set LIB=..\lib
-set BRIDGES=libm
+:: C files compiled with the project, one per lib\<name>\bridge.c. libm makes Odin's
+:: maths work; sce is needed by lib\gfx; add vorbis for lib\vorbis (Ogg music).
+set BRIDGES=libm sce
 :: Optimisation level for the bridge .c files.
-set BRIDGE_OPT=-O0
+set BRIDGE_OPT=-O2
 set ARCH=-march=armv7-a -mtune=cortex-a9 -mfpu=neon -mfloat-abi=hard
 :: ---------------------------------------------------------------
 :: Clean previous build
@@ -92,7 +94,9 @@ echo Linking ELF...
 :: the code ended just below a 64 KiB boundary it overflowed and the tool crashed
 :: (exit -1073740940, then "Cannot generate module NID" from vita-make-fself).
 arm-vita-eabi-gcc -o "%BUILD%\%TARGET%.elf" %OBJ% %ARCH% -Wl,-q -Wl,--defsym,__sce_headroom=0x10000 ^
-    -lSceCtrl_stub -lSceDisplay_stub -lSceAppUtil_stub -lScePower_stub -lSceCommonDialog_stub -lSceAppMgr_stub -lSceSysmem_stub -lSceLibKernel_stub -lSceIofilemgr_stub -lm
+    -lSceDisplay_stub -lSceGxm_stub -lSceSysmodule_stub -lSceCtrl_stub -lSceTouch_stub -lSceMotion_stub -lSceKernelThreadMgr_stub -lSceIofilemgr_stub -lSceAudio_stub ^
+    -lScePgf_stub -lScePvf_stub -lSceCommonDialog_stub -lSceAppMgr_stub -lSceAppUtil_stub -lScePower_stub -lSceSysmem_stub -lSceLibKernel_stub ^
+    -lpng16 -lz -lm
 if errorlevel 1 goto :fail
 :: ---------------------------------------------------------------
 :: Package: ELF -> velf -> eboot.bin, param.sfo -> .vpk

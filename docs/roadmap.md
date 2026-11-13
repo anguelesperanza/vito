@@ -68,13 +68,14 @@ made on a console.
 | `tools/make_test_sounds.py`, `tools/make_test_media.py` | Synthesise the WAV, Ogg and MP4 files the examples play |
 | `tools/net_test_server.py` | The PC side of `Net-Example` |
 | `docs/gxp-format.md` | What is known about the compiled shader format |
-| `NewProjectTemplate/` | Framebuffer demo on `lib/vito`, with `sce_sys` LiveArea files |
+| `NewProjectTemplate/` | A starting point for a game on `lib/vito` and `lib/gfx`: sprite, text, input, sound, packed assets, `sce_sys` LiveArea files |
 
 ### Examples and what each has proven
 
 | Example | Title ID | Covers | On a real Vita |
 |---|---|---|---|
-| `NewProjectTemplate` | `ODIN00001` | raw framebuffer, `SceCtrl`, `SceDisplay`, memory blocks | ✅ (before it moved to `lib/vito`; not re-run since) |
+| `NewProjectTemplate` | `ODIN00001` | a sprite, text, input and a sound on `lib/vito` and `lib/gfx` (rewritten 2026-11-13) | ✅ |
+| `Framebuffer-Example` | `ODIN00018` | raw framebuffer, `SceCtrl`, `SceDisplay`, memory blocks; the template's previous contents | ✅ |
 | `Vita2D-Example` | `ODIN00002` | sprites, shapes, text | ✅ |
 | `Touch-Example` | `ODIN00003` | front and back touch panels | ✅ |
 | `Audio-Example` | `ODIN00004` | `SceAudioOut` from a thread | ✅ |

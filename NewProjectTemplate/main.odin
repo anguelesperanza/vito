@@ -1,123 +1,143 @@
 package my_game
 
-import sce "../lib/sce"
+// A starting point for a game: one sprite you move with the d-pad or the left
+// stick, some text, and a sound on Cross.
+//
+//   lib/vito   start-up, memory, input, timing, files, audio
+//   lib/gfx    drawing: sprites, shapes and text (and 3D with your own
+//              shaders, see Examples/Gxm-Example)
+//   lib/sce    the raw VitaSDK calls, when the helpers do not cover something
+//
+// Everything in the assets folder is packed into the .vpk by build.bat and is
+// read at run time from "app0:/assets/...".
+//
+// Hold Start + Select for a second to exit.
+
+import "core:fmt"
+
+import gfx  "../lib/gfx"
+import sce  "../lib/sce"
 import vito "../lib/vito"
 
-SCREEN_W :: sce.DISPLAY_WIDTH
-SCREEN_H :: sce.DISPLAY_HEIGHT
+PLAYER_SPEED :: 300 // pixels per second
 
-SQUARE_SIZE  :: 64
-SQUARE_SPEED :: 6
-
-// ---------------------------------------------------------------
-// Entry point
-// ---------------------------------------------------------------
-// The proc name below can be anything — only the link_name matters.
-@(export, link_name = "odin_main")
-game_main :: proc "c" (argc: i32, argv: [^]cstring) -> i32 {
-    // Sets up the heap allocator, temp allocator, logger and assertion handler.
-    // Without it new / make / append do nothing on the Vita (see lib/vito).
-    context = vito.init()
-
-    sce.sceCtrlSetSamplingMode(.ANALOG)
-    sce.sceClibPrintf("odin_main: started\n")
-
-    // ---------------------------------------------------------------
-    // Two framebuffers (CDRAM blocks big enough for 960x544 RGBA8888). We draw
-    // into the one that is NOT being displayed, then swap. Drawing straight
-    // into the displayed buffer tears and flickers on real hardware, because
-    // the CPU fill takes longer than a frame.
-    // ---------------------------------------------------------------
-    fb_bytes :: SCREEN_W * SCREEN_H * 4
-    fb_size  :: u32((fb_bytes + sce.CDRAM_ALIGNMENT - 1) / sce.CDRAM_ALIGNMENT * sce.CDRAM_ALIGNMENT)
-
-    frames: [2]sce.DisplayFrameBuf
-    for i in 0 ..< 2 {
-        block := sce.sceKernelAllocMemBlock("display", sce.KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, fb_size, nil)
-        if block < 0 {
-            sce.sceClibPrintf("sceKernelAllocMemBlock failed: 0x%08x\n", u32(block))
-            return sce.sceKernelExitProcess(1)
-        }
-        base: rawptr
-        sce.sceKernelGetMemBlockBase(block, &base)
-        frames[i] = sce.DisplayFrameBuf {
-            size        = size_of(sce.DisplayFrameBuf),
-            base        = base,
-            pitch       = SCREEN_W,
-            pixelformat = sce.DISPLAY_PIXELFORMAT_A8B8G8R8,
-            width       = SCREEN_W,
-            height      = SCREEN_H,
-        }
-    }
-    back := 0 // index of the buffer we draw into
-
-    // ---------------------------------------------------------------
-    // Main loop
-    // ---------------------------------------------------------------
-    pad:    sce.CtrlData
-    sq_x:   i32 = (SCREEN_W - SQUARE_SIZE) / 2
-    sq_y:   i32 = (SCREEN_H - SQUARE_SIZE) / 2
-    scroll: u32 = 0
-    alt:    bool
-
-    prev_buttons: u32
-    for {
-        sce.sceCtrlPeekBufferPositive(0, &pad, 1)
-        pressed := pad.buttons & ~prev_buttons
-        prev_buttons = pad.buttons
-
-        // START exits
-        if pad.buttons & sce.CTRL_START != 0 do break
-
-        // ---- Update ----
-        if pad.buttons & sce.CTRL_LEFT  != 0 do sq_x -= SQUARE_SPEED
-        if pad.buttons & sce.CTRL_RIGHT != 0 do sq_x += SQUARE_SPEED
-        if pad.buttons & sce.CTRL_UP    != 0 do sq_y -= SQUARE_SPEED
-        if pad.buttons & sce.CTRL_DOWN  != 0 do sq_y += SQUARE_SPEED
-
-        // Left analogue stick: 0..255, centred near 128, with a dead zone.
-        if dx := i32(pad.lx) - 128; dx > 30 || dx < -30 do sq_x += dx / 20
-        if dy := i32(pad.ly) - 128; dy > 30 || dy < -30 do sq_y += dy / 20
-
-        sq_x = clamp(sq_x, 0, SCREEN_W - SQUARE_SIZE)
-        sq_y = clamp(sq_y, 0, SCREEN_H - SQUARE_SIZE)
-
-        if pressed & sce.CTRL_CROSS != 0 {
-            alt = !alt
-            sce.sceClibPrintf("CROSS pressed\n")
-        }
-        scroll += 1
-
-        // ---- Render ----
-        draw(([^]u32)(frames[back].base), sq_x, sq_y, scroll, alt)
-        sce.sceDisplaySetFrameBuf(&frames[back], .NEXTFRAME)
-        sce.sceDisplayWaitSetFrameBuf() // returns once the swap took effect
-        back ~= 1
-    }
-
-    // Do not free the framebuffer blocks here: the display is still scanning
-    // one of them out. The kernel releases them when the process exits.
-    sce.sceKernelExitProcess(0)
-    return 0
+// Start-up problems cannot be shown on a screen that is not set up yet, so
+// they go to a file: ux0:data/my_game_error.txt
+fail :: proc(what: string) -> i32 {
+    text := fmt.tprintf("%s\ngfx step %v, error 0x%08X, alloc 0x%08X\n",
+        what, gfx.init_step, u32(gfx.init_error), u32(gfx.last_alloc_error))
+    vito.print(text)
+    vito.write_entire_file("ux0:data/my_game_error.txt", transmute([]u8)text)
+    return sce.sceKernelExitProcess(1)
 }
 
-// Scrolling diagonal gradient with a white square on top.
-draw :: proc "contextless" (pixels: [^]u32, sq_x, sq_y: i32, scroll: u32, alt: bool) {
-    for y in 0 ..< SCREEN_H {
-        for x in 0 ..< SCREEN_W {
-            t := u8((u32(x + y) + scroll) & 0xFF)
-            if alt {
-                pixels[y * SCREEN_W + x] = sce.Color32(t, 0x20, 0xFF - t, 0xFF)
-            } else {
-                pixels[y * SCREEN_W + x] = sce.Color32(0x20, t, 0xFF - t, 0xFF)
-            }
+// Reads a file from the package. The data stays allocated; free it with
+// delete when it is no longer needed.
+asset :: proc(path: cstring) -> []u8 {
+    data, ok := vito.read_entire_file(path)
+    if !ok do vito.printf("could not read %s\n", path)
+    return data
+}
+
+// The proc name can be anything; the link_name is what main.c calls.
+@(export, link_name = "odin_main")
+game_main :: proc "c" (argc: i32, argv: [^]cstring) -> i32 {
+    // Sets up the heap, the temp allocator, the logger and assertions.
+    // Without it new / make / append do nothing on the Vita.
+    context = vito.init()
+
+    vito.input_init({})               // add .Front_Touch, .Back_Touch, .Motion as needed
+    audio_ok := vito.audio_init()
+
+    if !gfx.init() do return fail("gfx.init failed")              // gfx.init({multisample = ._4X}) for antialiasing
+    if !gfx.draw2d_init() do return fail("gfx.draw2d_init failed")
+
+    // ---- assets -------------------------------------------------------
+    ok: bool
+    player: gfx.Texture
+    {
+        png := asset("app0:/assets/player.png")
+        defer delete(png)
+        if player, ok = gfx.load_png(png); !ok do return fail("assets/player.png")
+    }
+    font: gfx.Font
+    {
+        png, fnt := asset("app0:/assets/font20.png"), asset("app0:/assets/font20.fnt")
+        defer delete(png)
+        defer delete(fnt)
+        if font, ok = gfx.load_font(png, fnt); !ok do return fail("assets/font20")
+    }
+    blip, blip_ok := vito.load_wav("app0:/assets/blip.wav")
+
+    // ---- game state -----------------------------------------------------
+    position := [2]f32{gfx.WIDTH / 2, gfx.HEIGHT / 2}
+    angle: f32
+    presses := 0
+
+    input: vito.Input
+    timer: vito.Frame_Timer
+    exit_hold := 0
+
+    for {
+        dt := vito.frame_tick(&timer) // seconds since the last frame
+        vito.input_update(&input)
+
+        if vito.held(input, vito.BUTTON_START) && vito.held(input, vito.BUTTON_SELECT) {
+            exit_hold += 1
+            if exit_hold > 60 do break
+        } else {
+            exit_hold = 0
         }
+
+        // ---- update -------------------------------------------------------
+        // dpad and left_stick are both -1..1 on each axis, +y down.
+        move := vito.dpad(input) + input.left_stick
+        position += move * PLAYER_SPEED * dt
+        position.x = clamp(position.x, 0, gfx.WIDTH)
+        position.y = clamp(position.y, 0, gfx.HEIGHT)
+        angle += dt
+
+        if vito.pressed(input, vito.BUTTON_CROSS) {
+            presses += 1
+            if blip_ok do vito.play_sound(blip)
+        }
+
+        // ---- draw -----------------------------------------------------------
+        gfx.begin_frame()
+        gfx.clear({0.08, 0.10, 0.18, 1})
+        gfx.begin_2d()
+
+        w, h := f32(player.width), f32(player.height)
+        gfx.draw_texture_ex(&player, {0, 0, w, h}, {position.x, position.y, w, h}, origin = {w / 2, h / 2}, rotation = angle)
+
+        gfx.draw_text(&font, 24, 36, "My Game", gfx.WHITE, 1.5)
+        gfx.draw_text(&font, 24, 64, "D-pad or left stick: move     Cross: sound", gfx.rgba(170, 170, 170))
+        gfx.draw_text(&font, 24, 92, fmt.tprintf("Cross pressed %d times     %.0f fps", presses, timer.fps), gfx.rgba(240, 220, 60))
+        if !audio_ok || !blip_ok do gfx.draw_text(&font, 24, 120, "audio is not available", gfx.rgba(250, 100, 100))
+        gfx.draw_text(&font, 24, 530, "Hold Start + Select to exit", gfx.rgba(240, 220, 60) if exit_hold > 0 else gfx.rgba(170, 170, 170))
+
+        gfx.end_2d()
+        gfx.end_frame()
+        gfx.swap()
+
+        // Everything made with the temp allocator this frame (fmt.tprintf above).
+        free_all(context.temp_allocator)
     }
 
-    white := sce.Color32(0xFF, 0xFF, 0xFF, 0xFF)
-    for y in sq_y ..< sq_y + SQUARE_SIZE {
-        for x in sq_x ..< sq_x + SQUARE_SIZE {
-            pixels[y * SCREEN_W + x] = white
-        }
-    }
+    // ---- shutdown: the GPU must be idle before its memory is released -------
+    vito.stop_all_voices()
+    if blip_ok do vito.unload_sound(&blip)
+    vito.audio_shutdown()
+
+    gfx.finish()
+    sce.sceGxmDisplayQueueFinish()
+    gfx.destroy_font(&font)
+    gfx.destroy_texture(&player)
+    gfx.draw2d_shutdown()
+    gfx.shutdown()
+
+    vito.input_shutdown()
+    vito.shutdown()
+    sce.sceKernelExitProcess(0)
+    return 0
 }
