@@ -731,6 +731,17 @@ the blobs.** Shader source and the compiled `.gxp` both live in the repo; the co
 does not (`tools/psp2cgc.exe`, git-ignored). None of the routes has been run yet, and
 whether `psp2cgc.exe` runs as-is on this machine is the first thing Phase 7 checks.
 
+Considered and declined (owner, 2026-11-13): replacing `psp2cgc.exe` with a compiler
+built from this repo. VitaSDK has no `psp2cgc.h`; its only shader-compiler header is
+`psp2/shacccg.h` (already bound, `lib/sce/shacccg.odin`), which is the interface to
+the compiler that runs on the console and needs Sony's `libshacccg.suprx` there. So
+the only tool that could be built is a Vita app fed over the network, not a PC
+executable. `psp2cgc.exe` stays.
+
+What writing our own compiler would take (its four parts, why the instruction
+encoder is the hard one, and a staged plan that starts from today's Cg route) is in
+[gxp-format.md](gxp-format.md), under "What a compiler of our own would need".
+
 Later, and outside vito's own scope: the owner plans a shader language for Matchbox
 with a compiler that emits each target's shader format (PC, 3DS, Vita). For the Vita
 that means writing `.gxp` directly, so the `.gxp` format will need to be documented

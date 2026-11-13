@@ -102,9 +102,68 @@ Instructions are 8 bytes each. Every program here starts with the same instructi
   way to learn an instruction is to compile two shaders that differ in one operation
   and compare the output with `gxp_info.py`.
 
-## A way to de-risk the compiler
+## What a compiler of our own would need
 
-The compiler does not have to write `.gxp` on day one. It can first emit Cg source
-and run `psp2cgc`, which is exactly what `tools/build_shaders.py` does today. That
-gets the shader language working on the Vita with a known-good back end, and the
-direct `.gxp` writer can replace it later without changing the language.
+A tool in the style of `psp2cgc` has four parts. Three are ordinary compiler work;
+one depends on knowledge that was never published.
+
+| Part | What it does | How hard |
+|---|---|---|
+| Front end | Parses the shader language, checks types, produces an intermediate form | Ordinary. Needed for the Matchbox shader language anyway. For Cg input it also needs Cg's built-in functions (`mul`, `dot`, `normalize`, `tex2D`, ...) |
+| Lowering | Turns that into operations the GPU has and assigns every value to one of its register banks (attributes, uniforms, temporaries, outputs) | Ordinary, but shaped by the hardware's rules |
+| Instruction encoder | Writes each operation as an 8-byte USSE instruction | **The hard part.** Not documented by Sony or Imagination |
+| Container writer | Wraps the code in a `.gxp`: header, parameter table, vertex-output and fragment-input tables, constants, metadata | Moderate. This file covers the header and parameters; the other tables are not mapped yet |
+
+What makes the encoder hard:
+
+- **The opcodes and their bit layouts.** Each instruction packs an operation, source
+  and destination registers, component swizzles and write masks into 64 bits.
+- **Fragment programs are split into phases.** Texture lookups whose coordinates
+  come straight from the vertex shader are done by the hardware before the shader
+  runs. The compiler describes those lookups in a table instead of emitting code for
+  them, and splits the program around any lookup that depends on computed values.
+- **Metadata the system checks.** `sceGxmProgramCheck` and the shader patcher both
+  validate the file, and the patcher rewrites part of it to apply blend modes and
+  output formats. Correct code with wrong metadata is rejected or drawn wrong.
+
+The three sources of that knowledge are listed under "Where to look next" above:
+Vita3K (the reading direction), `psp2spvc` (the writing direction), and differential
+testing with `psp2cgc`. The first two are described here from memory; their current
+state and licences have not been checked, which matters if code is to be reused and
+not only learned from.
+
+### A staged way to get there
+
+1. **Emit Cg and call `psp2cgc`.** This is what `tools/build_shaders.py` does today.
+   The shader language works on the Vita at once, with a known-good back end, and
+   the later stages can replace it without changing the language.
+2. **Write a disassembler.** Extend `tools/gxp_info.py` until it prints every
+   instruction and every table of the 18 shaders in this repository.
+3. **Write an assembler.** Take that printed form and rebuild the identical bytes.
+   When all 18 round-trip exactly, the format is understood for everything those
+   shaders use. Stages 2 and 3 need no compiler design at all, and are where the
+   real learning happens.
+4. **Generate code for a small subset:** straight-line shaders with multiply, add,
+   dot product and one texture lookup. That covers the colour, texture and sprite
+   shaders in this repository.
+5. **Widen it:** lighting maths, branches, dependent texture reads, more output
+   formats.
+
+Each stage should end the way every phase of the bindings did: the output loaded and
+drawn on a real Vita, and compared with what `psp2cgc` produces for the same source.
+
+### Rough size
+
+No reliable estimate is possible, because the encoding work is discovery and not
+only construction. As an order of magnitude: the subset in stage 4 is weeks of
+focused work if Vita3K's decoder is a good guide, and matching `psp2cgc` across
+everything a game might write is months. The front end for the Matchbox language is
+separate from both, and is needed for the PC and 3DS targets regardless.
+
+### What is not an alternative
+
+A compiler cannot be built from a header. VitaSDK has no `psp2cgc.h`; its
+`psp2/shacccg.h` is the interface to the compiler that runs on the console
+(`libshacccg.suprx`, a Sony binary). Using it would move the dependency from a PC
+executable to a file on the console, not remove it. That was considered and declined
+on 2026-11-13; see "Shader notes" in [roadmap.md](roadmap.md).
