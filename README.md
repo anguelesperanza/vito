@@ -1,8 +1,12 @@
-# Vito -- A WIP / POC Playstation Vita development bindings for Odin
+# Vito -- A Playstation Vita development (VitaSDK) bindings for Odin
 
-Vito, if it pans out, is meant to become a part of Matchbox as the third target platform form it (PC and 3DS being the other two).
+Vito is a set of odin bindings for VitaSDK meant for PS Vita.
 
-This repo would serve as a way to host the stand along bindings / code that Matchbox will use for it.
+The main goal of vito is to be able to use it as a target for Matchbox: https://github.com/anguelesperanza/Matchbox
+
+Vito is built around the same workarounds that O3DX is: https://github.com/anguelesperanza/O3DX
+
+These bindings are AI generated using Claude Fable 2.5 in an effort to not spend weeks to months writing these by hand
 
 ## What it is
 
@@ -242,5 +246,3 @@ docs/
   roadmap.md            what is done, what was measured, what is left
   gxp-format.md         notes on the compiled shader format
 ```
-
-AI may be used to generate these bindings to speed up the time it takes to development and to solve issues / bugs along the way
