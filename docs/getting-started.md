@@ -72,6 +72,15 @@ cd Examples\Runtime-Example  # allocator, fmt, maps, log, threads, assertions
 
 cd Examples\SaveData-Example # save file, SceAppUtil, power, assets, LiveArea
 .\build.bat                  # -> SaveData-Example.vpk
+
+cd Examples\Input-Example    # buttons, sticks, both touch panels, motion
+.\build.bat                  # -> Input-Example.vpk
+
+cd Examples\Sync-Example     # mutex, semaphore, event flag, threads, frame timer
+.\build.bat                  # -> Sync-Example.vpk
+
+cd Examples\Mixer-Example    # audio mixer, WAV files, BGM / VOICE ports, microphone
+.\build.bat                  # -> Mixer-Example.vpk
 ```
 
 Settings at the top of each `build.bat`:
@@ -171,6 +180,76 @@ Confirmed on a real Vita: the score and launch count survive closing and restart
 the app. Not recorded yet: which of the two save locations was used, whether the slot
 line is green, and whether the bubble shows the custom icon.
 
+### The input layer (`lib/vito/input.odin`)
+
+Instead of polling `SceCtrl`, `SceTouch` and `SceMotion` by hand:
+
+```odin
+vito.input_init({.Front_Touch, .Back_Touch, .Motion})   // once
+input: vito.Input
+for {
+    vito.input_update(&input)                            // once per frame
+    if vito.pressed(input, vito.BUTTON_CROSS) do jump()
+    if vito.held(input, vito.BUTTON_L | vito.BUTTON_R) do brake()
+    move := input.left_stick                             // -1..1, y down, dead zone applied
+    for t in vito.touches(&input.front) do tap(t.pos)    // screen pixels
+}
+```
+
+- `pressed` and `released` are true for one frame; `held` while the button is down.
+  A mask with several buttons means "any of them".
+- `BUTTON_L` / `BUTTON_R` cover both the handheld's shoulder buttons and a DualShock's
+  L1 / R1 (gotcha 15).
+- Sticks use a round dead zone, `vito.stick_dead_zone` (default 0.15), and are rescaled
+  so movement starts from zero at its edge.
+- Each `Touch` has a stable `id` while the finger is down, `pos` in screen pixels (the
+  back panel is mapped onto the same 960 x 544), `force`, and `pressed` on its first
+  frame. `panel.released_ids[:panel.released_count]` lists fingers lifted this frame.
+- `input.motion` has `acceleration` (g), `gyro` (rad/s), `orientation` (quaternion) and
+  a `valid` flag.
+- `input.raw` is the untouched `sce.CtrlData`.
+- Link `-lSceCtrl_stub -lSceTouch_stub -lSceMotion_stub`. All three are needed as soon
+  as `input_update` is called, even if touch and motion are not asked for.
+
+### Frame timing (`lib/vito/time.odin`)
+
+```odin
+timer: vito.Frame_Timer
+for {
+    dt := vito.frame_tick(&timer)   // seconds since the previous frame
+    ...
+}
+```
+
+`timer.fps` is averaged over half a second, `timer.elapsed` is seconds since the first
+tick, and a frame longer than `timer.max_delta` (default 0.1 s) reports that limit, so
+a long load or a suspend does not make game logic jump. `vito.time_us()` is the raw
+process clock in microseconds and `vito.sleep_ms(n)` blocks the calling thread.
+
+### Kernel sync objects
+
+`Examples/Sync-Example` uses each of these between two real threads and shows PASS or
+FAIL per check: mutex (including try-lock), lightweight mutex, semaphore (including a
+timeout), event flag, condition variable, read/write lock, message pipe, thread
+information, priority and CPU affinity, `sceKernelDelayThread`, `sceKernelPowerTick`
+and `sceKernelAtomicAddAndGet32`. All 13 checks pass on a real Vita. Things worth
+knowing when using them:
+
+- A timeout is a **pointer to microseconds**, and the kernel writes the time that was
+  left back into it. Use a fresh variable for each call; `nil` waits forever.
+- `sceKernelGetThreadInfo` (and the other `Get*Info` calls) need `info.size =
+  size_of(info)` set first.
+- A lightweight mutex (`KernelLwMutexWork`) lives in your own memory, so it must not
+  move or go out of scope while in use.
+- Link `-lSceKernelThreadMgr_stub` as well as `-lSceLibKernel_stub`.
+
+`Examples/Input-Example` shows everything live. It also makes the three `SceMotion`
+calls that pass a float (`sceMotionSetAngleThreshold` and friends), so it lists `sce`
+in `BRIDGES`. Note that `lib/sce/bridge.c` wraps functions from four libraries, so a
+project that uses it must link `-lSceGxm_stub -lScePgf_stub -lScePvf_stub
+-lSceMotion_stub` even if it only calls one of them. Confirmed on a real Vita, including the float
+bridge round trip.
+
 ### Touch input
 
 `lib/sce/touch.odin` binds `SceTouch` (link `-lSceTouch_stub`). All arguments are
@@ -185,6 +264,40 @@ integers, so it needs no float bridge.
   in `make_panel` / `to_screen`, with the known panel sizes as a fallback.
 - The back panel has a different active area (about 1920x890), so use its own
   `sceTouchGetPanelInfo`, not the front's.
+
+### The audio mixer (`lib/vito/audio.odin`)
+
+For games, use the mixer instead of feeding `SceAudioOut` by hand:
+
+```odin
+vito.audio_init()
+jump, _  := vito.load_wav("app0:/assets/jump.wav")
+music, _ := vito.load_wav("app0:/assets/music.wav")
+song := vito.play_sound(music, volume = 0.6, loop = true)
+...
+if vito.pressed(input, vito.BUTTON_CROSS) do vito.play_sound(jump, pan = -0.5)
+vito.voice_set_volume(song, 0.3)
+...
+vito.audio_shutdown()            // before unload_sound and before exit
+```
+
+- `play_sound(sound, volume, pan, loop, pitch)` returns a `Voice` handle. Up to 16
+  play at once; with all in use it returns 0. `stop_voice`, `voice_set_volume`,
+  `voice_set_pan`, `voice_set_pitch`, `voice_set_paused` and `voice_is_playing` take
+  that handle, and a handle whose sound has ended is ignored.
+- `set_master_volume`, `audio_peak` (0..1, for a meter), `active_voice_count`.
+- `load_wav` reads uncompressed PCM WAV: 8 or 16 bit, mono or stereo, any sample rate.
+  The mixer resamples to its 48 kHz stereo output, so files do not have to match.
+  Convert MP3 / Ogg / FLAC on the PC first.
+- A `Sound` is just samples in memory, so one can also be built by hand:
+  `vito.Sound{samples = buf, channels = 1, sample_rate = 16000, frames = len(buf)}`.
+- There is a delay of one or two buffers (21 to 43 ms) between `play_sound` and the
+  sound.
+- Link `-lSceAudio_stub -lSceKernelThreadMgr_stub -lSceIofilemgr_stub`.
+
+`Examples/Mixer-Example` plays overlapping effects and a music loop, and also tests the
+`BGM` and `VOICE` output ports and the microphone. It runs on hardware. The section
+below describes the raw `SceAudioOut` calls the mixer is built on.
 
 ### Audio output and threads
 

@@ -24,11 +24,11 @@ Last updated 2026-11-12. Toolchain: Odin `dev-2026-11:e28f5d1ff`, VitaSDK `2026.
 | | SDK bindings (`lib/sce`) | 🟡 | everything the headers declare is bound and links; a small part has run |
 | | `vita2d` bindings | ✅ | all 100 non-variadic functions; sharp text helper added |
 | 1 | Odin runtime (`lib/vito`) | ✅ | allocator, logger, assertions; two small items open |
-| 2 | Kernel, threads and time | 🟡 | bound; threads, clock and atomics run; sync objects not exercised |
+| 2 | Kernel, threads and time | ✅ | threads, sync objects, timing and the frame timer run on hardware; callbacks and fibers untried |
 | 3 | Files, save data and packaging | ✅ | save survives a restart; three details unrecorded |
-| 4 | Complete input | ⬜ | bound; needs the example and an input layer. **Next** |
+| 4 | Complete input | ✅ | input layer and `Input-Example` run on hardware; DualShock-only calls, HID and camera untried |
 | 5 | 2D graphics on `SceGxm` | ⬜ | `vita2d` covers 2D for now |
-| 6 | Complete audio | 🟡 | output works; mixer and decoding not started |
+| 6 | Complete audio | ✅ | mixer, WAV loader, `BGM` / `VOICE` ports and microphone run on hardware; no compressed formats or streaming |
 | 7 | The rest of `SceGxm` (3D, shaders) | ⬜ | bound, never called |
 | 8 | System UI and services | ⬜ | bound, never called (except `SceAppUtil`, `ScePower`) |
 | 9 | Networking | ⬜ | bound, never called |
@@ -65,6 +65,9 @@ made on a console.
 | `Platform-Example` | `ODIN00006` | process clock, file I/O, input edges | ✅ |
 | `Runtime-Example` | `ODIN00007` | `lib/vito`, `core:fmt`/`log`/`strings`/`strconv`/`slice`/`linalg`, a second thread, atomics, a failing assertion | ✅ all 12 checks, and the panic log |
 | `SaveData-Example` | `ODIN00008` | save file, `SceAppUtil`, `ScePower`, assets and LiveArea from the VPK | ✅ restart test |
+| `Input-Example` | `ODIN00009` | `lib/vito` input layer: buttons, sticks, both touch panels, motion; the `SceMotion` float bridge | ✅ |
+| `Sync-Example` | `ODIN00010` | kernel sync objects between two threads, thread info, timing, the frame timer | ✅ all 13 checks |
+| `Mixer-Example` | `ODIN00011` | `lib/vito` mixer and WAV loader, `BGM` and `VOICE` ports, microphone | hardware |
 
 Two caveats on that column:
 
@@ -197,7 +200,7 @@ Open:
 - The SCE error-name table (listed under the bindings).
 - Not tried in Vita3K.
 
-## Phase 2: kernel, threads and time 🟡
+## Phase 2: kernel, threads and time ✅
 
 Bound: all of `threadmgr` (threads, mutex, lightweight mutex and condition, semaphore,
 event flag, condition variable, message pipe, rwlock, callbacks), `processmgr`,
@@ -208,13 +211,22 @@ Run on hardware: thread create / start / wait / delete / exit, `sceKernelDelayTh
 `sceRtcGetCurrentClockLocalTime`, `sceClibPrintf` / `sceClibSnprintf`, and Odin
 atomics from two threads.
 
+Done and confirmed on hardware (all 13 checks pass):
+
+- `Examples/Sync-Example` (`ODIN00010`): mutex and try-lock, lightweight mutex,
+  semaphore and a wait timeout, event flag, condition variable, read/write lock,
+  message pipe, `sceKernelGetThreadInfo`, priority change, CPU affinity,
+  `sceKernelPowerTick`, `sceKernelAtomicAddAndGet32`. Each sync object is used between
+  two threads, and every wait has a timeout so a failure shows as FAIL, not a freeze.
+- `lib/vito/time.odin`: `Frame_Timer` / `frame_tick` (delta time, fps, clamped long
+  frames), `time_us`, `sleep_ms`.
+
 Open:
 
-- An example that uses a mutex, a semaphore and an event flag between two threads.
-  None of the sync objects has been called.
-- `sceKernelPowerTick` (stops auto-suspend), thread priority and CPU affinity, timers.
-- A frame-time helper in Odin (delta time from the process clock); the example
-  computes it by hand today.
+- Lightweight condition variables, callbacks, the `*CB` wait variants, fibers and the
+  `Open*` / `Close*` calls for named objects: bound, not called.
+- The message pipe works with the arguments from the SDK header's notes (type 0x40,
+  attr 12, 4 KiB buffer); the header calls them uncertain, but they are what ran.
 
 Done when: a threaded example uses a mutex, a semaphore and an event flag, and a
 frame-time helper, on hardware.
@@ -241,9 +253,32 @@ Open:
 - Power callbacks and suspend / resume (bound, not exercised). Moved to Phase 8.
 - `sceIoLseek` with a 64-bit offset (bound, not called; `sceIoLseek32` is what ran).
 
-## Phase 4: complete input ⬜ (M) — next
+## Phase 4: complete input ✅ (M)
 
-Everything is bound; nothing beyond basic polling has run.
+Done and confirmed on hardware (buttons, sticks, both touch panels, motion, and the
+float bridge round trip):
+
+- **The input layer, `lib/vito/input.odin`.** One `vito.input_update(&input)` per frame
+  gives held / pressed / released buttons, both sticks as -1..1 with a round dead
+  zone, front and back touches in screen pixels with a stable id and a "pressed this
+  frame" flag, the ids of lifted fingers, and motion (acceleration, gyro, orientation
+  quaternion). `BUTTON_L` / `BUTTON_R` match both the handheld's triggers and a
+  DualShock's L1 / R1.
+- **`Examples/Input-Example`** shows all of it live, and also calls directly:
+  `sceCtrlGetSamplingMode`, `sceCtrlGetControllerPortInfo`, `sceTouchEnableTouchForce`,
+  `sceTouchGetSamplingState`, `sceMotionGetTiltCorrection`, `sceMotionGetDeadband`, and
+  the three float-bridged `SceMotion` calls as a set / read-back round trip. That
+  round trip is the first use of the generated `lib/sce/bridge.c` on a console.
+
+Not done:
+
+- `sceCtrlPeekBufferPositive2` and the `Read*` / negative-logic variants, rapid fire,
+  actuators (rumble) and the light bar: bound, not called. Most only matter with a
+  DualShock on a PS TV.
+- `SceHid` (USB / Bluetooth keyboard and mouse) and `SceCamera`: bound, not tried.
+- `sceTouchRead` (the blocking read).
+
+The original list for this phase, for reference:
 
 - `SceCtrl` rest: `PeekBufferPositive2` / `ReadBuffer*`, negative logic, external
   controller ports (DualShock 4 via `GetControllerPortInfo`), button intercept and
@@ -278,18 +313,29 @@ free GPU memory until the GPU is done with it.
 Capstone, here or in Phase 7: port O3DX's `FlappyClone` (sprites, animation, physics,
 audio, saves). It exercises Phases 1 to 4 and 6 together.
 
-## Phase 6: complete audio 🟡 (L)
+## Phase 6: complete audio ✅ (L)
 
-Run on hardware: a `MAIN` mono port at 48 kHz, double-buffered output from a thread,
-volume, the drain call.
+Run on hardware (`Audio-Example` and `Mixer-Example`): a `MAIN` mono port at 48 kHz,
+double-buffered output from a thread, volume, the drain call, and everything below.
+
+- **The mixer, `lib/vito/audio.odin`.** One stereo 48 kHz `MAIN` port fed by its own
+  thread; 16 voices; per-voice volume, pan, pitch, looping and pause; a master volume
+  and a peak meter. Sounds are mono or stereo at any sample rate and are resampled
+  while mixing (linear interpolation, integer maths). Voice handles go stale safely.
+- **A WAV loader** (`load_wav`, `load_wav_from_memory`): uncompressed PCM, 8 or 16 bit.
+  Plus `read_entire_file` / `write_entire_file` in `lib/vito/file.odin`.
+- **`Examples/Mixer-Example`** (`ODIN00011`): overlapping effects and a music loop from
+  three WAV files in the VPK (8-bit mono 11 kHz, 16-bit mono 22 kHz, 16-bit stereo
+  16 kHz, made by `tools/make_test_sounds.py`); a port test for the `BGM` port at
+  44.1 kHz stereo and the `VOICE` port at 16 kHz mono with `SetConfig`, `GetConfig`,
+  per-channel `SetVolume`, `GetRestSample`, `SetAlcMode` and `GetAdopt`; and one
+  second recorded from the microphone (`SceAudioIn`) and played back.
 
 Open:
 
-- `SceAudioOut` rest: stereo, the `BGM` and `VOICE` ports, other sample rates,
-  `SetConfig` / `GetConfig`, `SetAlcMode`.
-- `SceAudioIn` (microphone).
-- An Odin mixer: channels with volume, pan and looping, driven from the audio thread.
-- Decoding: see "Audio decoding notes". Not decided.
+- Compressed music. See "Audio decoding notes". Not decided; the mixer plays whatever
+  PCM it is given, so a decoder can be added without changing it.
+- Streaming long sounds from a file instead of loading them whole.
 
 Done when: an example plays looping music and overlapping effects from files in the
 VPK with volume control, and records from the microphone, on hardware.
@@ -452,10 +498,10 @@ would fill the same files:
 | Matchbox file | Needs | Vita today |
 |---|---|---|
 | `window_*` | init, cleanup, screen size | `vita2d.Init`, 960 x 544 constants ✅ |
-| `events_*`, `input_*` | pressed / held / released, sticks | `SceCtrl` ✅; the edge logic is written per example until the Phase 4 input layer exists. Keyboard and mouse return false, as on the 3DS |
+| `events_*`, `input_*` | pressed / held / released, sticks | `SceCtrl` ✅; `lib/vito/input.odin` gives the edges and dead-zoned sticks ✅. Keyboard and mouse return false, as on the 3DS |
 | `render_*` | start, clear, end, triangles | `StartDrawing`, `ClearScreen`, `EndDrawing` + `SwapBuffers` ✅; triangles through `DrawArray` with pool vertices (`vita2d` has no triangle call) |
 | `sprite_*` | create from a file, draw with scale, rotation, tint, source rectangle | `LoadPNGFile("app0:/assets/...")` and the `DrawTexture*` family ✅ |
-| `audio_*` | play sounds | `SceAudioOut` ✅ for raw PCM; loading and mixing are Phase 6 (Matchbox's 3DS audio is an empty stub today) |
+| `audio_*` | play sounds | `lib/vito/audio.odin` ✅: WAV loading and a 16-voice mixer on `SceAudioOut` (Matchbox's 3DS audio is an empty stub today) |
 | `logger_*`, `util_*` | print, delta time, allocation | `vito.print*` and `core:log` ✅, `sceKernelGetProcessTimeWide` ✅, `lib/vito` allocators ✅ |
 | assets | files in the package | `assets\` packed by `build.bat` ✅ |
 
@@ -474,7 +520,7 @@ be written:
 
 | Milestone | Phases | What Matchbox gets | State |
 |---|---|---|---|
-| A: 2D game target | 1, 2, 3, 4, 6, and 2D through `vita2d` | sprites, text, input, audio, saves, assets | 1 and 3 done; 2 and 6 partly; 4 next |
+| A: 2D game target | 1, 2, 3, 4, 6, and 2D through `vita2d` | sprites, text, input, audio, saves, assets | 1, 2, 3, 4 and 6 done |
 | B: 3D | 7 (and 5 if kept separate) | depth, render targets, custom shaders | blocked on the shader decision |
 | C: online and system features | 8, 9 | dialogs, power events, networking | not started |
 | D: extras | 10, 12 | video, polish, the demo game | not started |

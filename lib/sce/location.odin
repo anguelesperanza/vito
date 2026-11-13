@@ -39,55 +39,49 @@ LocationHandle :: u32
 
 // Usage permission dialog display status
 LocationDialogStatus :: enum u32 {
-    IDLE                       = 0x0, // Dialog initial idle status
-    RUNNING                    = 0x1, // Dialog running
-    FINISHED                   = 0x2, // Dialog operation finished
-    SCE_LOCATION_DIALOG_STATUS = 0xFFFFFFFF,
+    IDLE     = 0, // Dialog initial idle status
+    RUNNING  = 1, // Dialog running
+    FINISHED = 2, // Dialog operation finished
 }
 
 // Usage permission dialog result
 LocationDialogResult :: enum u32 {
-    NONE                       = 0x0, // Result is not stored
-    DISABLE                    = 0x1, // Negative result is stored
-    ENABLE                     = 0x2, // Positive result is stored
-    SCE_LOCATION_DIALOG_RESULT = 0xFFFFFFFF,
+    NONE    = 0, // Result is not stored
+    DISABLE = 1, // Negative result is stored
+    ENABLE  = 2, // Positive result is stored
 }
 
 // location usage permission status for individual application
 LocationPermissionApplicationStatus :: enum u32 {
-    NONE                                = 0x0, // liblocation not used
-    INIT                                = 0x1, // liblocation not accessed
-    DENY                                = 0x2, // liblocation access denied status
-    ALLOW                               = 0x3, // liblocation access allowed status
-    SCE_LOCATION_PERMISSION_APPLICATION = 0xFFFFFFFF,
+    NONE  = 0, // liblocation not used
+    INIT  = 1, // liblocation not accessed
+    DENY  = 2, // liblocation access denied status
+    ALLOW = 3, // liblocation access allowed status
 }
 
 // location usage permission status
 LocationPermissionStatus :: enum u32 {
-    DENY                    = 0x0, // liblocation access denied status
-    ALLOW                   = 0x1, // liblocation access allowed status
-    SCE_LOCATION_PERMISSION = 0xFFFFFFFF,
+    DENY  = 0, // liblocation access denied status
+    ALLOW = 1, // liblocation access allowed status
 }
 
 // Location measurement method
 LocationLocationMethod :: enum u32 {
-    NONE                 = 0x0, // Do not perform location measurement
-    AGPS_AND_3G_AND_WIFI = 0x1, // Perform measurement by switching between AGPS, Wi-Fi, and 3G
-    GPS_AND_WIFI         = 0x2, // Perform measurement by switching between GPS and Wi-Fi
-    WIFI                 = 0x3, // Use only Wi-Fi
-    _3G                  = 0x4, // Use only 3G
-    GPS                  = 0x5, // Use only GPS
-    SCE_LOCATION_LMETHOD = 0xFFFFFFFF,
+    NONE                 = 0, // Do not perform location measurement
+    AGPS_AND_3G_AND_WIFI = 1, // Perform measurement by switching between AGPS, Wi-Fi, and 3G
+    GPS_AND_WIFI         = 2, // Perform measurement by switching between GPS and Wi-Fi
+    WIFI                 = 3, // Use only Wi-Fi
+    _3G                  = 4, // Use only 3G
+    GPS                  = 5, // Use only GPS
 }
 
 // Direction measurement method
 LocationHeadingMethod :: enum u32 {
-    NONE                 = 0x0, // Don't perform heading measurement
-    AUTO                 = 0x1, // Automatically determine hold orientation and outputs its value
-    VERTICAL             = 0x2, // Output value in vertical hold reference system
-    HORIZONTAL           = 0x3, // Output value in horizontal hold reference system
-    CAMERA               = 0x4, // Output value in camera axis reference system
-    SCE_LOCATION_HMETHOD = 0xFFFFFFFF,
+    NONE       = 0, // Don't perform heading measurement
+    AUTO       = 1, // Automatically determine hold orientation and outputs its value
+    VERTICAL   = 2, // Output value in vertical hold reference system
+    HORIZONTAL = 3, // Output value in horizontal hold reference system
+    CAMERA     = 4, // Output value in camera axis reference system
 }
 
 // Structure of location information

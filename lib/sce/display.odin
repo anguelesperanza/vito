@@ -23,9 +23,8 @@ DISPLAY_PIXELFORMAT_A8B8G8R8    :: 0x0
 DISPLAY_PIXELFORMAT_A2B10G10R10 :: 0x60800000
 
 DisplaySetBufSync :: enum u32 {
-    IMMEDIATE          = 0x0,
-    NEXTFRAME          = 0x1,
-    SCE_DISPLAY_SETBUF = 0xFFFFFFFF,
+    IMMEDIATE = 0,
+    NEXTFRAME = 1,
 }
 
 // Structure used with ::ksceDisplaySetFrameBuf to set/update framebuffer.

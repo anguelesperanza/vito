@@ -23,7 +23,7 @@ lib/
     inline.odin       ports of the headers' static inline functions and macros (hand-written)
     helpers.odin      small extras: Color32, thread defaults, ... (hand-written)
     bridge.c          generated float wrappers for the 21 SCE functions that pass floats by value
-  vito/               Odin runtime for the Vita: heap and temp allocators, logger, assertion handler, print
+  vito/               Odin runtime and helpers: allocators, logger, assertions, print, input layer, frame timer, audio mixer, WAV loader
   vita2d/             libvita2d bindings + bridge.c (float wrappers); text.odin draws sharp text at any size
   libm/               bridge.c + redefine.syms: makes math.sin/cos/min/max work (hard-float libm)
 tools/bindgen/
@@ -31,16 +31,20 @@ tools/bindgen/
   linkcheck.py        links every bound function against the stub libraries
   report.md           what was generated, and what was left out and why
 tools/make_livearea.py   placeholder LiveArea icon and pictures for a project (sce_sys)
+tools/make_test_sounds.py   synthesises the WAV files Mixer-Example plays
 tools/gen_libm_syms.py   regenerates lib/libm/redefine.syms
 NewProjectTemplate/   main.odin, main.c, build.bat -> MyGame.vpk (framebuffer demo)
 Examples/
   Vita2D-Example/       vita2d demo
-  Vita2D-Full-Example/  every vita2d function, eight pages (built, not yet run)
+  Vita2D-Full-Example/  every vita2d function, eight pages
   Touch-Example/        front + back touch demo
   Audio-Example/        4-key synthesizer (audio thread)
   Platform-Example/     clock, file I/O, input edges
   Runtime-Example/      lib/vito: allocator, fmt, maps, log, threads, atomics, assertions
   SaveData-Example/     save file, SceAppUtil slots and system parameters, power, assets and LiveArea
+  Input-Example/        lib/vito input layer: buttons, sticks, both touch panels, motion
+  Sync-Example/         kernel mutex, semaphore, event flag, cond, rwlock, message pipe, thread info, frame timer
+  Mixer-Example/        lib/vito audio mixer and WAV loader, BGM and VOICE ports, microphone
 docs/                 setup guide, roadmap
 ```
 

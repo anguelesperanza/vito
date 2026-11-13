@@ -1039,6 +1039,11 @@ def main():
         es = node.values.enumerators
         vals = [M.enum_consts[e.name] for e in es]
         mode = enum_mode(cname, node)
+        # Members named __SCE_... = 0xFFFFFFFF only force the C enum to 32 bits.
+        # They are not values anyone passes, so they are left out.
+        kept = [(e, v) for e, v in zip(es, vals) if not e.name.startswith("__")]
+        if kept:
+            es, vals = [e for e, _ in kept], [v for _, v in kept]
         like_hex = any(e.value is not None and (not isinstance(e.value, (c_ast.Constant, c_ast.UnaryOp))
                                                 or (isinstance(e.value, c_ast.Constant)
                                                     and e.value.value.lower().startswith("0x"))) for e in es)
