@@ -92,7 +92,7 @@ echo Linking ELF...
 :: the code ended just below a 64 KiB boundary it overflowed and the tool crashed
 :: (exit -1073740940, then "Cannot generate module NID" from vita-make-fself).
 arm-vita-eabi-gcc -o "%BUILD%\%TARGET%.elf" %OBJ% %ARCH% -Wl,-q -Wl,--defsym,__sce_headroom=0x10000 ^
-    -lSceCtrl_stub -lSceDisplay_stub -lSceSysmem_stub -lSceLibKernel_stub -lSceIofilemgr_stub -lm
+    -lSceCtrl_stub -lSceDisplay_stub -lSceAppUtil_stub -lScePower_stub -lSceCommonDialog_stub -lSceAppMgr_stub -lSceSysmem_stub -lSceLibKernel_stub -lSceIofilemgr_stub -lm
 if errorlevel 1 goto :fail
 :: ---------------------------------------------------------------
 :: Package: ELF -> velf -> eboot.bin, param.sfo -> .vpk

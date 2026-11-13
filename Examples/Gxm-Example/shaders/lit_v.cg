@@ -1,0 +1,16 @@
+// Position, normal and texture coordinate. The normal is turned by the model
+// matrix and handed to the fragment shader for per-pixel lighting.
+void main(
+    float3 aPosition,
+    float3 aNormal,
+    float2 aTexcoord,
+    uniform float4x4 uMvp,
+    uniform float4x4 uModel,
+    out float4 vPosition : POSITION,
+    out float3 vNormal : TEXCOORD0,
+    out float2 vTexcoord : TEXCOORD1)
+{
+    vPosition = mul(float4(aPosition, 1.f), uMvp);
+    vNormal = mul(float4(aNormal, 0.f), uModel).xyz;
+    vTexcoord = aTexcoord;
+}

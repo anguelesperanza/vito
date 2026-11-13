@@ -12,5 +12,9 @@ odin_asm/
 error-screenshots/
 Examples/*/assets/font.ttf
 
+# Sony's shader compiler: proprietary, must never be committed. (*.exe above
+# already covers it; this line keeps it ignored if that rule is ever removed.)
+tools/psp2cgc.exe
+
 # binding generator scratch (preprocessed headers, GCC probes, link check)
 tools/bindgen/work/

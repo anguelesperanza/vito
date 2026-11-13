@@ -1,0 +1,8 @@
+// The texture multiplied by one colour (white leaves it unchanged).
+float4 main(
+    float2 vTexcoord : TEXCOORD0,
+    uniform sampler2D uTexture,
+    uniform float4 uTint) : COLOR
+{
+    return tex2D(uTexture, vTexcoord) * uTint;
+}

@@ -93,7 +93,7 @@ echo Linking ELF...
 :: (exit -1073740940, then "Cannot generate module NID" from vita-make-fself).
 arm-vita-eabi-gcc -o "%BUILD%\%TARGET%.elf" %OBJ% %ARCH% -Wl,-q -Wl,--defsym,__sce_headroom=0x10000 ^
     -lvita2d -lSceDisplay_stub -lSceGxm_stub -lSceSysmodule_stub -lSceCtrl_stub -lSceTouch_stub -lSceMotion_stub -lSceIofilemgr_stub ^
-    -lScePgf_stub -lScePvf_stub -lSceCommonDialog_stub -lSceAppMgr_stub -lSceSysmem_stub -lSceLibKernel_stub ^
+    -lScePgf_stub -lScePvf_stub -lSceCommonDialog_stub -lSceAppMgr_stub -lSceAppUtil_stub -lScePower_stub -lSceSysmem_stub -lSceLibKernel_stub ^
     -lfreetype -lpng16 -ljpeg -lz -lbz2 -lm
 if errorlevel 1 goto :fail
 :: ---------------------------------------------------------------

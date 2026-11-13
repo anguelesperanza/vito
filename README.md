@@ -23,8 +23,12 @@ lib/
     inline.odin       ports of the headers' static inline functions and macros (hand-written)
     helpers.odin      small extras: Color32, thread defaults, ... (hand-written)
     bridge.c          generated float wrappers for the 21 SCE functions that pass floats by value
-  vito/               Odin runtime and helpers: allocators, logger, assertions, print, input layer, frame timer, audio mixer, WAV loader
+  vito/               Odin runtime and helpers: allocators, logger, assertions, print, input layer, frame timer, audio mixer, WAV loader, dialogs, system events
   vita2d/             libvita2d bindings + bridge.c (float wrappers); text.odin draws sharp text at any size
+  gfx/                SceGxm without vita2d: setup, shaders, textures, render targets; 2D sprites, shapes and text
+  net/                networking: sockets, DNS, HTTP (the console's own HTTPS is too old for current servers)
+  vorbis/             Ogg Vorbis music streamed through the mixer (stb_vorbis)
+  video/              MP4 playback through the console's hardware decoder
   libm/               bridge.c + redefine.syms: makes math.sin/cos/min/max work (hard-float libm)
 tools/bindgen/
   gen.py              the binding generator (Python 3 + pycparser)
@@ -33,6 +37,11 @@ tools/bindgen/
 tools/make_livearea.py   placeholder LiveArea icon and pictures for a project (sce_sys)
 tools/make_test_sounds.py   synthesises the WAV files Mixer-Example plays
 tools/gen_libm_syms.py   regenerates lib/libm/redefine.syms
+tools/make_font.py       bakes a TrueType font into the atlas lib/gfx draws text from
+tools/make_test_media.py makes Media-Example's Ogg and MP4 files with ffmpeg
+tools/net_test_server.py PC side of Net-Example: TCP / UDP echo server
+tools/gxp_info.py        prints a compiled shader's header and parameters
+tools/build_shaders.py   compiles Cg shaders to .gxp (needs your own tools/psp2cgc.exe, which is git-ignored)
 NewProjectTemplate/   main.odin, main.c, build.bat -> MyGame.vpk (framebuffer demo)
 Examples/
   Vita2D-Example/       vita2d demo
@@ -45,7 +54,13 @@ Examples/
   Input-Example/        lib/vito input layer: buttons, sticks, both touch panels, motion
   Sync-Example/         kernel mutex, semaphore, event flag, cond, rwlock, message pipe, thread info, frame timer
   Mixer-Example/        lib/vito audio mixer and WAV loader, BGM and VOICE ports, microphone
-docs/                 setup guide, roadmap
+  System-Example/       lib/vito dialogs and on-screen keyboard, power and resume events, system modules
+  Gxm-Example/          SceGxm with our own shaders: triangle, texture, blending, depth, lighting, render to texture
+  Sprite-Example/       lib/gfx 2D: batched sprites, shapes, baked-font text, PNG loading, over a 3D scene
+  GxmFeatures-Example/  stencil, mipmaps, texture formats, lines and points, instancing, region clip
+  Net-Example/          lib/net: connection info, DNS, HTTP and HTTPS, TCP and UDP with a PC
+  Media-Example/        Ogg music streaming, MP4 video, camera
+docs/                 setup guide, roadmap, notes on the .gxp shader format
 ```
 
 AI may be used to generate these bindings to speed up the time it takes to development and to solve issues / bugs along the way

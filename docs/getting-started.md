@@ -81,6 +81,24 @@ cd Examples\Sync-Example     # mutex, semaphore, event flag, threads, frame time
 
 cd Examples\Mixer-Example    # audio mixer, WAV files, BGM / VOICE ports, microphone
 .\build.bat                  # -> Mixer-Example.vpk
+
+cd Examples\System-Example   # dialogs, on-screen keyboard, power events, system modules
+.\build.bat                  # -> System-Example.vpk
+
+cd Examples\Gxm-Example      # SceGxm with our own shaders: 3D, textures, lighting
+.\build.bat                  # -> Gxm-Example.vpk
+
+cd Examples\Sprite-Example   # 2D on SceGxm: sprites, shapes, text, over a 3D scene
+.\build.bat                  # -> Sprite-Example.vpk
+
+cd Examples\GxmFeatures-Example   # stencil, mipmaps, texture formats, instancing
+.\build.bat                  # -> GxmFeatures-Example.vpk
+
+cd Examples\Net-Example      # Wi-Fi info, DNS, HTTP / HTTPS, TCP and UDP sockets
+.\build.bat                  # -> Net-Example.vpk
+
+cd Examples\Media-Example    # Ogg music streaming, MP4 video, camera
+.\build.bat                  # -> Media-Example.vpk
 ```
 
 Settings at the top of each `build.bat`:
@@ -211,6 +229,14 @@ for {
 - Link `-lSceCtrl_stub -lSceTouch_stub -lSceMotion_stub`. All three are needed as soon
   as `input_update` is called, even if touch and motion are not asked for.
 
+**Stub libraries every `lib/vito` project links.** Odin emits every procedure of an
+imported package, used or not, so a project that imports `lib/vito` needs the stubs
+for all of it: `-lSceCtrl_stub -lSceTouch_stub -lSceMotion_stub -lSceAudio_stub
+-lSceCommonDialog_stub -lSceAppUtil_stub -lScePower_stub -lSceAppMgr_stub
+-lSceKernelThreadMgr_stub -lSceIofilemgr_stub -lSceSysmem_stub -lSceLibKernel_stub`.
+A missing one shows as `undefined reference to sce...` at link time. Linking a stub
+costs nothing at run time.
+
 ### Frame timing (`lib/vito/time.odin`)
 
 ```odin
@@ -298,6 +324,304 @@ vito.audio_shutdown()            // before unload_sound and before exit
 `Examples/Mixer-Example` plays overlapping effects and a music loop, and also tests the
 `BGM` and `VOICE` output ports and the microphone. It runs on hardware. The section
 below describes the raw `SceAudioOut` calls the mixer is built on.
+
+### Dialogs and the on-screen keyboard (`lib/vito/dialog.odin`)
+
+The system draws its dialogs on top of the game's frame, so the game keeps running
+its loop while one is open. Three things are needed:
+
+```odin
+vito.dialog_init()                    // once; also calls sceAppUtilInit
+
+// every frame, between the end of the scene and the swap:
+v2d.EndDrawing()
+v2d.CommonDialogUpdate()
+v2d.SwapBuffers()
+
+// open one, then poll it every frame until done:
+vito.message_dialog_open("Save before quitting?", .Yes_No)
+if result, done := vito.message_dialog_poll(); done {
+    if result.button == 1 { /* Yes */ }
+}
+
+vito.text_input_open("Your name", "Player", 32)
+buf: [128]u8
+if text, accepted, done := vito.text_input_poll(buf[:]); done && accepted {
+    // text is UTF-8, stored in buf
+}
+```
+
+- Only one dialog can be open at a time; an `*_open` call returns false otherwise, or
+  when the system refuses it (`vito.dialog_last_error` has the code).
+- Buttons still reach the game while a dialog is open. Skip the game's own input when
+  `vito.dialog_active()` is true.
+- `result.button` is 1 for OK, Yes or the first custom button, 2 for No or the second,
+  3 for the third. `result.canceled` is set when the user backed out or the game
+  closed the dialog.
+- Also there: `error_dialog_open(code)`, `system_message_dialog_open(type)`,
+  `progress_dialog_open(text)` with `progress_dialog_set(percent)` and
+  `message_dialog_close()`, and `dialog_abort()`.
+- The keyboard and several other system APIs use UTF-16: `vito.to_utf16(dst, s)` and
+  `vito.from_utf16(buf, src)` convert.
+
+### Suspend, resume and power events (`lib/vito/system.odin`)
+
+A game is not asked before it is suspended (PS button, power button, idle timeout); it can
+only find out afterwards. `vito.power_events_start()` starts a small thread that
+receives the system's power callback, and `vito.power_events_take()` returns the
+`sce.POWER_CB_*` flags that arrived since the last call:
+
+```odin
+events := vito.power_events_take()
+if events & sce.POWER_CB_APP_RESUME != 0 { /* back from the LiveArea: pause, reset timers */ }
+```
+
+`vito.system_event_poll()` reports `SceAppMgr` events (resume among them), and
+`vito.system_ui_overlaid()` is true while the system draws over the game.
+
+Optional system modules (`SceIme`, `SceNet`, `SceNotificationUtil`, `SceScreenShot`,
+...) must be loaded with `sce.sceSysmoduleLoadModule(.NAME)` before their functions
+are called; until then the calls fail.
+
+`Examples/System-Example` uses all of this, and runs on hardware.
+
+### 3D and custom shaders (`lib/gfx`, `SceGxm`)
+
+`vita2d` covers 2D. For 3D, or any drawing with your own shaders, `lib/gfx` sets
+`SceGxm` up and the drawing is done with the `sce.sceGxm*` calls. It runs on
+hardware; `Examples/Gxm-Example` is the reference.
+
+**Shaders.** `SceGxm` only runs compiled `.gxp` programs. Shaders are written in Cg,
+one file per program, named `NAME_v.cg` (vertex) or `NAME_f.cg` (fragment), and
+compiled on the PC:
+
+```
+python tools\build_shaders.py Examples\Gxm-Example\shaders
+```
+
+That needs Sony's `psp2cgc.exe` at `tools\psp2cgc.exe` (or `PSP2CGC` set to its
+path). The compiler is proprietary and git-ignored; the `.gxp` files it writes are
+checked in, so building a project does not need it. A program is embedded and
+registered with `gfx.register_program(#load("shaders/color_v.gxp"))`.
+
+**A frame.**
+
+```odin
+gfx.init({multisample = ._4X})         // or gfx.init() for no antialiasing
+
+gfx.begin_frame()
+gfx.clear({0, 0, 0, 1})
+vertex_uniforms, fragment_uniforms := gfx.use_programs(vertex_program, fragment_program)
+gfx.set_uniform_matrix(vertex_uniforms, mvp_param, &mvp)
+sce.sceGxmSetVertexStream(gfx.ctx, 0, vertices)
+sce.sceGxmDraw(gfx.ctx, .TRIANGLES, .U16, indices, index_count)
+gfx.end_frame()
+gfx.swap()
+```
+
+Rules that differ from OpenGL-style APIs:
+
+- Vertices, indices and textures must be in memory mapped for the GPU: `gfx.alloc`,
+  not `new` or `make`. Blocks are rounded up to 4 KiB (256 KiB in video memory), so
+  pack small meshes into one block.
+- Do not free or rewrite that memory while a frame using it may still be rendering;
+  `gfx.finish()` waits for the GPU.
+- A vertex program is tied to one vertex layout, and a fragment program to one blend
+  mode and one multisample mode. Blending is not a state you switch: make a second
+  fragment program (`gfx.create_fragment_program(f, v, .Alpha)`).
+- Uniforms live in a buffer reserved per program selection. Call `gfx.use_programs`
+  again before a draw that needs different uniform values.
+- Clip space is as in OpenGL, and `core:math/linalg`'s `matrix4_perspective_f32` and
+  `matrix_ortho3d_f32` match it. Pass Odin's matrix memory unchanged and write
+  `mul(vector, matrix)` in the shader.
+- To draw into a texture: `gfx.create_target`, then `gfx.begin_target` ...
+  `gfx.end_frame` before `gfx.begin_frame`. Fragment programs used there need
+  `target_multisample = .NONE`.
+- Link `-lSceGxm_stub -lSceDisplay_stub -lSceCommonDialog_stub -lpng16 -lz` and put
+  `sce` in `BRIDGES` (`sceGxmSetViewport` takes floats).
+
+### 2D on `lib/gfx`: sprites, shapes and text
+
+The same package draws 2D, so a game can do without `vita2d` and put a HUD over a
+3D scene in one frame. It runs on hardware; `Examples/Sprite-Example` is the
+reference.
+
+```odin
+gfx.init()
+gfx.draw2d_init()
+player, _ := gfx.load_png(png_bytes)                 // from vito.read_entire_file or #load
+font, _   := gfx.load_font(#load("assets/font20.png"), #load("assets/font20.fnt"))
+
+gfx.begin_frame()
+gfx.clear({0, 0, 0, 1})
+// ... any 3D drawing ...
+gfx.begin_2d()
+gfx.draw_texture(&player, 100, 200)
+gfx.draw_texture_ex(&sheet, {0, 0, 32, 32}, {400, 300, 64, 64}, origin = {32, 32}, rotation = angle)
+gfx.draw_rect(0, 0, 960, 40, gfx.rgba(0, 0, 0, 128))
+gfx.draw_text(&font, 16, 30, "Score 100")
+gfx.end_2d()
+gfx.end_frame()
+gfx.swap()
+```
+
+- Coordinates are pixels from the top left. Colours are `0xAABBGGRR`
+  (`gfx.rgba(r, g, b, a)`); a texture is multiplied by the colour.
+- `draw_texture_ex` takes the part of the texture to draw (`src`), where and how big
+  (`dst`), the point it sits on and turns around (`origin`), a rotation in radians,
+  a colour and two flip flags.
+- Sprites drawn one after another from the same texture become one draw call. Put
+  small images on one sheet and draw by texture where the order allows.
+  `gfx.draw2d_stats()` reports quads and draw calls for the last frame.
+- A frame holds at most `gfx.MAX_QUADS_PER_FRAME` (8192) quads; more are dropped and
+  counted in `gfx.draw2d_dropped()`.
+- `gfx.set_blend(.Additive)` switches blending inside `begin_2d` / `end_2d`.
+- `begin_2d` also works inside `begin_target`, in the target's pixels.
+
+**Fonts** are baked on the PC into an atlas (a PNG and a `.fnt` file):
+
+```
+python tools\make_font.py C:\Windows\Fonts\DejaVuSans.ttf 20 assets\font20 --chars latin1
+```
+
+Text is sharpest at the baked size; bake one atlas per size that matters. Check the
+font's licence before shipping an atlas made from it. `gfx.measure_text` gives the
+size of a string for alignment.
+
+### More `SceGxm`: stencil, mipmaps, texture formats, instancing
+
+`Examples/GxmFeatures-Example` has one page for each of these, and runs on
+hardware. The short version of each:
+
+- **Stencil.** The depth buffer `lib/gfx` creates has 8 stencil bits, reset at the
+  start of every scene. Write with `sce.sceGxmSetFrontStencilRef` and
+  `sce.sceGxmSetFrontStencilFunc(ctx, .ALWAYS, .KEEP, .KEEP, .REPLACE, 0xFF, 0xFF)`,
+  test with `.EQUAL` / `.NOT_EQUAL`. To write stencil without colour, use a fragment
+  program made with `gfx.create_fragment_program_blend` and
+  `colorMask = sce.GXM_COLOR_MASK_NONE`.
+- **Other texture formats.** `gfx.create_texture_format(width, height, format, bytes,
+  layout, mip_count)` gives raw memory to fill. Mipmaps and block-compressed formats
+  need the `.Swizzled` layout: power-of-two sizes, pixels (or 4 x 4 blocks) in Morton
+  order, at index `gfx.swizzle(x, y)`. Mip levels follow each other, largest first,
+  and are used once `sce.sceGxmTextureSetMipFilter(&t.texture, .ENABLED)` is called.
+  A paletted texture needs its 256-colour palette in `gfx.alloc` memory too
+  (`sce.sceGxmTextureSetPalette`).
+- **Lines and points.** Draw with `.LINES` or `.POINTS` and set the matching polygon
+  mode first (`sce.sceGxmSetFrontPolygonMode(ctx, .LINE)` or `.POINT`); set it back
+  to `.TRIANGLE_FILL` afterwards. Line width is `sce.sceGxmSetFrontPointLineWidth`;
+  a point's size is a `PSIZE` output of the vertex shader. `.TRIANGLE_LINE` draws
+  triangles as wireframe.
+- **Instancing.** Give the per-instance values their own vertex stream with
+  `indexSource = sce.GXM_INDEX_SOURCE_INSTANCE_16BIT`
+  (`gfx.create_vertex_program_streams`), then
+  `sce.sceGxmDrawInstanced(ctx, .TRIANGLES, .U16, indices, indices_per_instance *
+  instances, indices_per_instance)`.
+- **Region clip.** `sce.sceGxmSetRegionClip(ctx, .OUTSIDE, x0, y0, x1, y1)` limits
+  drawing to a rectangle; `.NONE` turns it off. On a real Vita `.INSIDE` does the
+  same as `.OUTSIDE` (it also keeps the inside), so to draw everywhere except a
+  rectangle use the stencil buffer instead.
+
+What is known about the compiled shader format is in [gxp-format.md](gxp-format.md);
+`python tools\gxp_info.py file.gxp` prints a shader's parameters.
+
+### Networking (`lib/net`)
+
+`lib/net` starts the network libraries and wraps sockets, name lookup and HTTP.
+Sockets, DNS and plain HTTP run on hardware; **HTTPS to current servers does not work** (see
+below). `Examples/Net-Example` is the reference.
+
+```odin
+net.init()                                   // once; net.init(http = false) for sockets only
+if !net.connected() { /* no Wi-Fi */ }
+
+response, ok := net.http_get("http://example.com/")
+if ok {
+    // response.status, response.body ([]u8)
+    net.http_free(&response)
+}
+
+address, _ := net.resolve("example.com", 80)   // or net.parse_ip("192.168.1.10", 9999)
+socket, _  := net.tcp_connect(address)
+net.send_all(socket, data)
+n := net.receive(socket, buffer[:])            // 0: closed by the other side; < 0: error
+net.close(socket)
+```
+
+- **Every call waits** for the other side or a timeout. Make them from a second
+  thread, as the example does, or the picture freezes. `net.set_non_blocking` is
+  there for sockets polled from the game loop instead.
+- UDP: `net.udp_open`, `net.udp_send`, `net.udp_receive`. A server: `net.tcp_listen`
+  and `net.tcp_accept`.
+- `net.info()` returns the IP address, gateway, DNS, Wi-Fi name and signal strength.
+- **HTTPS** checks certificates against the console's own list of authorities, which
+  has not been updated for years, so many current sites fail. `net.https_set_verify(false)`
+  turns the check off: still encrypted, but the server is no longer proven to be who
+  it claims. After a failure `net.last_http_step`, `net.last_error`
+  (`net.http_error_name` gives it a name) and `net.last_ssl_error` say where and why.
+  **On hardware, HTTPS to a current server (`https://example.com/`) fails in the
+  TLS handshake** (`HTTPS_ERROR_HANDSHAKE`), before certificates are checked: the
+  console's TLS versions and ciphers are too old, and no setting here helps. Reaching
+  such servers needs a TLS library shipped with the game. That is deferred; the plan
+  for adding it is under "To revisit" in [roadmap.md](roadmap.md).
+- Link `-lSceNet_stub -lSceNetCtl_stub -lSceHttp_stub -lSceSsl_stub -lSceSysmodule_stub`.
+
+To test sockets, run the PC side and type the address it prints into the example:
+
+```
+python tools\net_test_server.py
+```
+
+### Music, video and the camera
+
+`Examples/Media-Example` covers all three, and all three run on hardware.
+
+**Music (`lib/vorbis`).** Long music as WAV is about 11 MB a minute; as Ogg Vorbis it
+is about 1 MB and is decoded while it plays.
+
+```odin
+vito.audio_init()
+data, _ := vito.read_entire_file("app0:/assets/music.ogg")
+music, ok := vorbis.open(data)            // keeps reading from data
+vorbis.play(music, volume = 0.8, loop = true)
+// vorbis.set_paused, set_volume, seek, position, duration, is_playing
+vorbis.close(music)                       // then data may be freed
+```
+
+- Add `vorbis` to `BRIDGES` in `build.bat`: the decoder (`stb_vorbis`) is a C file
+  compiled with the project.
+- Effects played with `vito.play_sound` mix with it. Convert on the PC with
+  `ffmpeg -i song.wav -c:a libvorbis -q:a 4 song.ogg`.
+- Underneath is `vito.play_stream(fill, user, sample_rate)`, which plays whatever a
+  callback produces; use it directly for generated sound or another decoder. The
+  callback runs on the audio thread and must not block.
+
+**Video (`lib/video`).** MP4 with H.264 video and AAC sound, decoded by the console's
+hardware. It needs `lib/gfx` (not `vita2d`).
+
+```odin
+movie, ok := video.open("app0:/assets/intro.mp4")
+// every frame:
+video.update(movie)
+if movie.has_frame {
+    gfx.set_blend(.None)       // a video picture has no alpha
+    gfx.draw_texture_ex(&movie.texture, {0, 0, f32(movie.width), f32(movie.height)}, {0, 0, 960, 544})
+    gfx.set_blend(.Alpha)
+}
+if video.finished(movie) { /* done */ }
+// at the end:
+gfx.finish()
+video.close(movie)
+```
+
+- Encode for it with, for example: `ffmpeg -i in.mov -c:v libx264 -profile:v baseline
+  -level 3.1 -pix_fmt yuv420p -vf scale=960:544 -r 30 -c:a aac -ar 48000 -ac 2
+  -movflags +faststart out.mp4`
+- Its sound uses the `BGM` audio port, so it plays alongside the mixer.
+- Link `-lSceAvPlayer_stub -lSceAudio_stub`.
+
+**Camera.** There is no helper; the example's `camera_start` / `camera_update` show
+the calls. The camera writes each picture into memory you give it, so pointing it at
+a `gfx` texture's pixels shows it with no copying. Link `-lSceCamera_stub`.
 
 ### Audio output and threads
 
@@ -594,6 +918,16 @@ These all caused a real failure while setting this up.
     1.0. The PVF page of `Vita2D-Full-Example` shows both side by side. The PGF text
     functions scale a bitmap the same way and have no such helper yet. Confirmed
     fixed on a real Vita.
+20. **Give a system library the memory alignment it asks for.** `SceAvPlayer` asks for
+    its picture buffers through a callback with an alignment argument (1 MiB). Given
+    memory aligned to only 256 KiB it reported no error: it started, then stopped
+    without a picture. Pass the alignment on with `KernelAllocMemBlockOpt`
+    (`attr = KERNEL_ALLOC_MEMBLOCK_ATTR_HAS_ALIGNMENT`), as `lib/video` does.
+19. **Handles that are addresses look negative.** `sceAvPlayerInit` returns an `int`
+    that is really a pointer, so a good handle is usually below zero as an `i32`.
+    Check such results against 0, not with `< 0`. (Ordinary SCE calls do return
+    negative error codes; this is the exception, and the header does not say which
+    a function is.)
 18. **Link with `-Wl,--defsym,__sce_headroom=0x10000`** (every `build.bat` does).
     `vita-elf-create` appends its SCE metadata (module info, import tables, NIDs;
     2,752 bytes for the audio example, more with more imports) to the end of the code
@@ -619,6 +953,9 @@ These all caused a real failure while setting this up.
 
 ## Not verified
 
+- **`sceGxmSetRegionClip` with `.INSIDE`.** On hardware it gave the same result as
+  `.OUTSIDE` (only the inside of the rectangle is drawn). Marked to revisit; the open
+  questions are listed under "To revisit" in [roadmap.md](roadmap.md).
 - **The generated `sce` bindings beyond what the examples call.** They link and their
   layouts match GCC, but most of the 1,649 functions have never been called on a Vita.
 - **64-bit arguments: checked in the assembly, not yet on hardware.** On ARM32 a `u64`
@@ -628,7 +965,8 @@ These all caused a real failure while setting this up.
   stack 8-byte aligned. Small structs by value, struct returns, narrow integers and C
   variadics were checked the same way and match the AAPCS. So functions such as
   `sceIoLseek` are bound directly, with no bridge. Only `float`/`double` by value still
-  needs one. Calling one of these on a Vita is still to do.
+  needs one. Confirmed on a Vita by `sceHttpCreateRequestWithURL` (three arguments,
+  then a `u64`) in `Net-Example`.
 - **`-microarch:cortex-a9`** (gotcha 14): all examples build with it; none has been
   re-run on hardware or in Vita3K since it was added.
 - **Double-precision (`f64`) libm wrappers.** `lib/libm/bridge.c` also defines

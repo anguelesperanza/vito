@@ -85,6 +85,39 @@ Mix_Voice :: struct {
 // finished reading the one it was given (getting-started, gotcha 13).
 @(private = "file") mix_buffers:  [2][MIX_GRAIN * 2]i16
 
+// ---- streams: audio produced a piece at a time (decoded music) ------------
+
+// Called by the mixer thread when a stream needs more audio. It writes up to
+// `frames` stereo frames (left, right, left, right...) into `out` and returns
+// how many it wrote. Fewer than asked means the stream has ended. It runs on
+// the audio thread: it must not block for long, and must only touch data
+// that nothing else is using at the same time.
+Stream_Fill :: #type proc "c" (user: rawptr, out: [^]i16, frames: i32) -> i32
+
+// A playing stream, returned by play_stream. 0 is "no stream".
+Stream :: distinct u32
+
+// How many streams can play at once (music, and a second for a crossfade).
+MAX_STREAMS :: 2
+// Stereo frames asked of a stream at a time.
+@(private = "file") STREAM_CHUNK :: 2048
+
+@(private = "file")
+Mix_Stream :: struct {
+    active:     bool,
+    paused:     bool,
+    ended:      bool, // the fill callback returned short; play out what is left
+    generation: u32,
+    fill:       Stream_Fill,
+    user:       rawptr,
+    frames:     u64, // valid frames in buffer
+    pos:        u64, // position in buffer frames, 32.32 fixed point
+    step:       u64,
+    gain:       i32,
+    buffer:     [STREAM_CHUNK * 2]i16,
+}
+@(private = "file") mix_streams: [MAX_STREAMS]Mix_Stream
+
 // Opens the output port and starts the mixer thread. Returns false if either
 // fails; the other audio calls are then harmless no-ops.
 audio_init :: proc "contextless" () -> bool {
@@ -121,6 +154,7 @@ audio_shutdown :: proc "contextless" () {
     sce.sceAudioOutReleasePort(mix_port)
     sce.sceKernelDeleteLwMutex(&mix_lock)
     mix_voices = {}
+    for &st in mix_streams do st.active = false
     mix_port, mix_thread = -1, -1
 }
 
@@ -168,6 +202,7 @@ stop_all_voices :: proc "contextless" () {
     lock()
     defer unlock()
     for &v in mix_voices do v.active = false
+    for &st in mix_streams do st.active = false
 }
 
 // Stops every voice that is playing this sound. Call it before freeing the
@@ -417,6 +452,38 @@ mix :: proc "contextless" (out: ^[MIX_GRAIN * 2]i16) {
         }
     }
 
+    for &st in mix_streams {
+        if !st.active || st.paused do continue
+        for i in 0 ..< MIX_GRAIN {
+            if st.pos >= st.frames << 32 {
+                if st.ended {
+                    st.active = false
+                    break
+                }
+                // Keep the fraction, so resampling stays continuous across pieces.
+                st.pos -= st.frames << 32
+                got := st.fill(st.user, &st.buffer[0], STREAM_CHUNK)
+                st.frames = u64(clamp(got, 0, STREAM_CHUNK))
+                if got < STREAM_CHUNK do st.ended = true
+                if st.frames == 0 {
+                    st.active = false
+                    break
+                }
+                if st.pos >= st.frames << 32 do st.pos = 0
+            }
+            index := st.pos >> 32
+            frac  := i32((st.pos >> 17) & 0x7FFF)
+            next  := min(index + 1, st.frames - 1)
+            a, b := i32(st.buffer[index * 2]), i32(st.buffer[next * 2])
+            l := a + ((b - a) * frac) >> 15
+            a, b = i32(st.buffer[index * 2 + 1]), i32(st.buffer[next * 2 + 1])
+            r := a + ((b - a) * frac) >> 15
+            acc[i * 2]     += (l * st.gain) >> GAIN_SHIFT
+            acc[i * 2 + 1] += (r * st.gain) >> GAIN_SHIFT
+            st.pos += st.step
+        }
+    }
+
     master := intrinsics.volatile_load(&mix_master)
     peak: i32
     for i in 0 ..< MIX_GRAIN * 2 {
@@ -426,4 +493,73 @@ mix :: proc "contextless" (out: ^[MIX_GRAIN * 2]i16) {
         peak = max(peak, abs(s))
     }
     intrinsics.volatile_store(&mix_peak, min(peak, 32767))
+}
+
+// ---------------------------------------------------------------
+// Streams
+// ---------------------------------------------------------------
+
+// Starts playing audio that `fill` produces on demand, as stereo at
+// `sample_rate`. `user` is handed back to `fill`. Returns 0 if audio is not
+// running or MAX_STREAMS streams are already playing.
+play_stream :: proc "contextless" (fill: Stream_Fill, user: rawptr, sample_rate: int, volume: f32 = 1) -> Stream {
+    if mix_port < 0 || fill == nil || sample_rate <= 0 do return 0
+    lock()
+    defer unlock()
+    for &st, i in mix_streams {
+        if st.active do continue
+        generation := st.generation + 1
+        st.active, st.paused, st.ended = true, false, false
+        st.generation = generation
+        st.fill, st.user = fill, user
+        st.frames, st.pos = 0, 0
+        st.step = u64(f64(sample_rate) / MIX_SAMPLE_RATE * 4294967296.0)
+        st.gain = i32(clamp(volume, 0, 8) * GAIN_ONE)
+        return Stream(generation << 8 | u32(i + 1))
+    }
+    return 0
+}
+
+@(private = "file")
+find_stream :: proc "contextless" (stream: Stream) -> ^Mix_Stream {
+    index := int(u32(stream) & 0xFF) - 1
+    if mix_port < 0 || index < 0 || index >= MAX_STREAMS do return nil
+    st := &mix_streams[index]
+    if !st.active || st.generation != u32(stream) >> 8 do return nil
+    return st
+}
+
+// Stops a stream. When this returns, its fill callback is not running and
+// will not be called again, so whatever it reads from can be released.
+stop_stream :: proc "contextless" (stream: Stream) {
+    lock()
+    defer unlock()
+    if st := find_stream(stream); st != nil do st.active = false
+}
+
+// False once the stream has ended or was stopped.
+stream_is_playing :: proc "contextless" (stream: Stream) -> bool {
+    lock()
+    defer unlock()
+    return find_stream(stream) != nil
+}
+
+stream_set_volume :: proc "contextless" (stream: Stream, volume: f32) {
+    lock()
+    defer unlock()
+    if st := find_stream(stream); st != nil do st.gain = i32(clamp(volume, 0, 8) * GAIN_ONE)
+}
+
+stream_set_paused :: proc "contextless" (stream: Stream, paused: bool) {
+    lock()
+    defer unlock()
+    if st := find_stream(stream); st != nil do st.paused = paused
+}
+
+// Runs `body` while the mixer is not mixing, so it can safely change data a
+// stream's fill callback reads (seek a decoder, for example).
+with_mixer_locked :: proc "contextless" (body: proc "contextless" (user: rawptr), user: rawptr) {
+    lock()
+    defer unlock()
+    body(user)
 }
